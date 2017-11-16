@@ -1,4 +1,4 @@
-<%@ page language="C#" autoeventwireup="true" inherits="OpenSTE, App_Web_lsnpvlg0" %>
+<%@ Page Language="C#" AutoEventWireup="true" CodeFile="OpenSTE.aspx.cs" Inherits="OpenSTE" %>
 
 <!DOCTYPE html>
 

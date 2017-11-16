@@ -19,13 +19,14 @@
     <MvcBuildViews>false</MvcBuildViews>
     <UseIISExpress>true</UseIISExpress>
     <IISExpressSSLPort />
-    <IISExpressAnonymousAuthentication>enabled</IISExpressAnonymousAuthentication>
-    <IISExpressWindowsAuthentication>disabled</IISExpressWindowsAuthentication>
+    <IISExpressAnonymousAuthentication>disabled</IISExpressAnonymousAuthentication>
+    <IISExpressWindowsAuthentication>enabled</IISExpressWindowsAuthentication>
     <IISExpressUseClassicPipelineMode />
     <UseGlobalApplicationHostFile />
     <NuGetPackageImportStamp>
     </NuGetPackageImportStamp>
     <TargetFrameworkProfile />
+    <Use64BitIISExpress />
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
@@ -60,35 +61,35 @@
     <Reference Include="FaultData">
       <HintPath>..\Dependencies\FaultData.dll</HintPath>
     </Reference>
-    <Reference Include="GSF.Communication, Version=2.1.356.0, Culture=neutral, processorArchitecture=MSIL">
-      <HintPath>..\packages\GSF.Communication.2.1.356-beta\lib\net46\GSF.Communication.dll</HintPath>
+    <Reference Include="GSF.Communication, Version=2.2.63.0, Culture=neutral, processorArchitecture=MSIL">
+      <HintPath>..\packages\GSF.Communication.2.2.63-beta\lib\net46\GSF.Communication.dll</HintPath>
       <Private>True</Private>
     </Reference>
-    <Reference Include="GSF.Core, Version=2.1.356.0, Culture=neutral, processorArchitecture=MSIL">
-      <HintPath>..\packages\GSF.Core.2.1.356-beta\lib\net46\GSF.Core.dll</HintPath>
+    <Reference Include="GSF.Core, Version=2.2.63.0, Culture=neutral, processorArchitecture=MSIL">
+      <HintPath>..\packages\GSF.Core.2.2.63-beta\lib\net46\GSF.Core.dll</HintPath>
       <Private>True</Private>
     </Reference>
     <Reference Include="GSF.Geo">
       <HintPath>..\Dependencies\GSF.Geo.dll</HintPath>
     </Reference>
-    <Reference Include="GSF.Security, Version=2.1.356.0, Culture=neutral, processorArchitecture=MSIL">
-      <HintPath>..\packages\GSF.Security.2.1.356-beta\lib\net46\GSF.Security.dll</HintPath>
+    <Reference Include="GSF.Security, Version=2.2.63.0, Culture=neutral, processorArchitecture=MSIL">
+      <HintPath>..\packages\GSF.Security.2.2.63-beta\lib\net46\GSF.Security.dll</HintPath>
       <Private>True</Private>
     </Reference>
-    <Reference Include="GSF.ServiceModel, Version=2.1.356.0, Culture=neutral, processorArchitecture=MSIL">
-      <HintPath>..\packages\GSF.ServiceModel.2.1.356-beta\lib\net46\GSF.ServiceModel.dll</HintPath>
+    <Reference Include="GSF.ServiceModel, Version=2.2.63.0, Culture=neutral, processorArchitecture=MSIL">
+      <HintPath>..\packages\GSF.ServiceModel.2.2.63-beta\lib\net46\GSF.ServiceModel.dll</HintPath>
       <Private>True</Private>
     </Reference>
-    <Reference Include="GSF.ServiceProcess, Version=2.1.356.0, Culture=neutral, processorArchitecture=MSIL">
-      <HintPath>..\packages\GSF.ServiceProcess.2.1.356-beta\lib\net46\GSF.ServiceProcess.dll</HintPath>
+    <Reference Include="GSF.ServiceProcess, Version=2.2.63.0, Culture=neutral, processorArchitecture=MSIL">
+      <HintPath>..\packages\GSF.ServiceProcess.2.2.63-beta\lib\net46\GSF.ServiceProcess.dll</HintPath>
       <Private>True</Private>
     </Reference>
-    <Reference Include="GSF.TimeSeries, Version=2.1.356.0, Culture=neutral, processorArchitecture=MSIL">
-      <HintPath>..\packages\GSF.TimeSeries.2.1.356-beta\lib\net46\GSF.TimeSeries.dll</HintPath>
+    <Reference Include="GSF.TimeSeries, Version=2.2.63.0, Culture=neutral, processorArchitecture=MSIL">
+      <HintPath>..\packages\GSF.TimeSeries.2.2.63-beta\lib\net46\GSF.TimeSeries.dll</HintPath>
       <Private>True</Private>
     </Reference>
-    <Reference Include="GSF.Web, Version=2.1.356.0, Culture=neutral, processorArchitecture=MSIL">
-      <HintPath>..\packages\GSF.Web.2.1.356-beta\lib\net46\GSF.Web.dll</HintPath>
+    <Reference Include="GSF.Web, Version=2.2.63.0, Culture=neutral, processorArchitecture=MSIL">
+      <HintPath>..\packages\GSF.Web.2.2.63-beta\lib\net46\GSF.Web.dll</HintPath>
       <Private>True</Private>
     </Reference>
     <Reference Include="Ionic.Zlib">
@@ -139,9 +140,15 @@
       <HintPath>..\packages\RazorEngine.3.7.7\lib\net45\RazorEngine.dll</HintPath>
       <Private>True</Private>
     </Reference>
+    <Reference Include="RouteDebugger, Version=2.1.5.0, Culture=neutral, processorArchitecture=MSIL">
+      <HintPath>..\packages\routedebugger.2.1.5\lib\net40\RouteDebugger.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
     <Reference Include="System" />
+    <Reference Include="System.Activities" />
     <Reference Include="System.Data" />
     <Reference Include="System.Data.DataSetExtensions" />
+    <Reference Include="System.Data.Entity" />
     <Reference Include="System.Data.Linq">
       <Private>True</Private>
     </Reference>
@@ -170,6 +177,7 @@
     <Reference Include="System.Runtime.Caching">
       <Private>True</Private>
     </Reference>
+    <Reference Include="System.Transactions" />
     <Reference Include="System.Web.DynamicData" />
     <Reference Include="System.Web.Entity" />
     <Reference Include="System.Web.ApplicationServices" />
@@ -257,6 +265,9 @@
     <Content Include="Content\bootstrap\images\ui-icons_333333_256x240.png" />
     <Content Include="Content\bootstrap\images\ui-icons_ffffff_256x240.png" />
     <Content Include="Content\bootstrap\theme.css" />
+    <Content Include="Content\daterangepicker.css" />
+    <Content Include="Content\fonts\fontawesome-webfont.svg" />
+    <Content Include="Content\fonts\glyphicons-halflings-regular.svg" />
     <Content Include="Content\graphics\close.png" />
     <Content Include="Content\graphics\closeX.png" />
     <Content Include="Content\graphics\controlbar-black-border.gif" />
@@ -282,6 +293,31 @@
     <Content Include="Content\graphics\scrollarrows.png" />
     <Content Include="Content\graphics\zoomin.cur" />
     <Content Include="Content\graphics\zoomout.cur" />
+    <Content Include="Content\images\layers-2x.png" />
+    <Content Include="Content\images\layers.png" />
+    <Content Include="Content\images\loading.gif" />
+    <Content Include="Content\images\loadingbar.gif" />
+    <Content Include="Content\images\marker-icon-2x.png" />
+    <Content Include="Content\images\marker-icon.png" />
+    <Content Include="Content\images\marker-shadow.png" />
+    <Content Include="Content\images\password-meter.png" />
+    <Content Include="Content\images\rating.png" />
+    <Content Include="Content\images\ui-bg_flat_0_aaaaaa_40x100.png" />
+    <Content Include="Content\images\ui-bg_flat_0_eeeeee_40x100.png" />
+    <Content Include="Content\images\ui-bg_flat_55_ffffff_40x100.png" />
+    <Content Include="Content\images\ui-bg_flat_75_ffffff_40x100.png" />
+    <Content Include="Content\images\ui-bg_glass_65_ffffff_1x400.png" />
+    <Content Include="Content\images\ui-bg_highlight-soft_100_f6f6f6_1x100.png" />
+    <Content Include="Content\images\ui-bg_highlight-soft_25_0073ea_1x100.png" />
+    <Content Include="Content\images\ui-bg_highlight-soft_50_dddddd_1x100.png" />
+    <Content Include="Content\images\ui-icons_0073ea_256x240.png" />
+    <Content Include="Content\images\ui-icons_454545_256x240.png" />
+    <Content Include="Content\images\ui-icons_666666_256x240.png" />
+    <Content Include="Content\images\ui-icons_ff0084_256x240.png" />
+    <Content Include="Content\images\ui-icons_ffffff_256x240.png" />
+    <Content Include="Content\jquery.jspanel.css" />
+    <Content Include="Content\jquery.jspanel.min.css" />
+    <Content Include="Content\overview.css" />
     <Content Include="Content\themes\redmond\images\animated-overlay.gif" />
     <Content Include="Content\themes\redmond\images\ui-bg_flat_0_aaaaaa_40x100.png" />
     <Content Include="Content\themes\redmond\images\ui-bg_flat_55_fbec88_40x100.png" />
@@ -301,9 +337,6 @@
     <Content Include="Content\themes\redmond\jquery-ui.css" />
     <Content Include="Content\themes\redmond\jquery-ui.min.css" />
     <Content Include="Content\themes\redmond\theme.css" />
-    <Content Include="Data\PostgreSQL\GSFSchema.sql" />
-    <Content Include="Data\PostgreSQL\InitialDataSet.sql" />
-    <Content Include="Data\PostgreSQL\SampleDataSet.sql" />
     <Content Include="EASServiceTemplate.aspx.cs">
       <DependentUpon>EASServiceTemplate.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
@@ -319,42 +352,70 @@
     <Compile Include="Global.asax.cs">
       <DependentUpon>Global.asax</DependentUpon>
     </Compile>
+    <Content Include="Content\fonts\jsglyph.svg" />
     <Content Include="ICFService.aspx.cs">
       <DependentUpon>ICFService.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
     </Content>
-    <Content Include="MeterDisturbancesByLine.aspx.cs">
-      <DependentUpon>MeterDisturbancesByLine.aspx</DependentUpon>
-      <SubType>ASPXCodeBehind</SubType>
-    </Content>
-    <Content Include="MeterEventsByLine.aspx.cs">
-      <DependentUpon>MeterEventsByLine.aspx</DependentUpon>
-      <SubType>ASPXCodeBehind</SubType>
-    </Content>
-    <Content Include="ModbusData.aspx.cs">
-      <DependentUpon>ModbusData.aspx</DependentUpon>
-      <SubType>ASPXCodeBehind</SubType>
-    </Content>
+    <Compile Include="Model\AlarmRangeLimit.cs" />
     <Compile Include="Model\AppModel.cs" />
+    <Compile Include="Model\Channel.cs" />
+    <Compile Include="Model\ContourClasses.cs" />
+    <Compile Include="Model\DashSettings.cs" />
+    <Compile Include="Model\DataFile.cs" />
     <Compile Include="Model\DeviceDetail.cs" />
+    <Compile Include="Model\DeviceFilter.cs" />
+    <Compile Include="Model\Disturbance.cs" />
+    <Compile Include="Model\DisturbanceSeverity.cs" />
+    <Compile Include="Model\Event.cs" />
+    <Compile Include="Model\FaultNote.cs" />
+    <Compile Include="Model\FaultSummary.cs" />
+    <Compile Include="Model\FileGroup.cs" />
     <Compile Include="Model\GlobalSettings.cs" />
+    <Compile Include="Model\Line.cs" />
     <Compile Include="Model\MeasurementDetail.cs" />
     <Compile Include="Model\MeasurementValue.cs" />
     <Compile Include="Model\Menu.cs" />
     <Compile Include="Model\MenuItem.cs" />
+    <Compile Include="Model\Meter.cs" />
+    <Compile Include="Model\MeterActivity.cs" />
+    <Compile Include="Model\MeterGroup.cs" />
+    <Compile Include="Model\MeterID.cs" />
+    <Compile Include="Model\MeterLocationsEventView.cs" />
     <Compile Include="Model\Page.cs" />
     <Compile Include="Model\PhasorDetail.cs" />
+    <Compile Include="Model\SavedViews.cs" />
     <Compile Include="Model\SchemaVersion.cs" />
     <Compile Include="Model\Settings.cs" />
     <Compile Include="Model\StatusLight.cs" />
+    <Compile Include="Model\TrendingData.cs" />
     <Compile Include="Model\ValueList.cs" />
     <Compile Include="Model\ValueListGroup.cs" />
+    <Content Include="Images\ConfigImages\configure.png" />
+    <Content Include="Images\ConfigImages\contactUs.png" />
+    <Content Include="Images\ConfigImages\doc.png" />
+    <Content Include="Images\ConfigImages\documentation.png" />
+    <Content Include="Images\ConfigImages\help.png" />
+    <Content Include="Images\ConfigImages\lock.png" />
+    <Content Include="Images\ConfigImages\qmark.png" />
+    <Content Include="Images\ConfigImages\tools.png" />
+    <Content Include="Images\PQI.png" />
     <Content Include="OpenSEE.aspx.cs">
       <DependentUpon>OpenSEE.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
     </Content>
     <Content Include="OpenSTE.aspx.cs">
       <DependentUpon>OpenSTE.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Content>
+    <Content Include="PQI.aspx" />
+    <Content Include="PQIByEvent.aspx.cs">
+      <DependentUpon>PQIByEvent.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Content>
+    <Compile Include="Model\WorkbenchVoltageCurveView.cs" />
+    <Content Include="PQI.aspx.cs">
+      <DependentUpon>PQI.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
     </Content>
     <Compile Include="Properties\AssemblyInfo.cs" />
@@ -378,8 +439,6 @@
     <Content Include="Content\font-awesome.css" />
     <Content Include="Content\font-awesome.min.css" />
     <Content Include="Content\ICFDetails.css" />
-    <Content Include="Content\jquery.multiselect.css" />
-    <Content Include="Content\jquery.multiselect.filter.css" />
     <Content Include="Content\MeterEventsByLine.css" />
     <Content Include="Content\ModbusData.css" />
     <Content Include="Content\OpenSEE.css" />
@@ -445,12 +504,10 @@
     <Content Include="Images\TVAcompanylogo.jpg" />
     <Content Include="Images\yesterdaymockup.png" />
     <Content Include="mapService.asmx" />
-    <Content Include="MeterDisturbancesByLine.aspx" />
-    <Content Include="MeterEventsByLine.aspx" />
-    <Content Include="ModbusData.aspx" />
     <Content Include="OpenSEE.aspx" />
     <Content Include="OpenSTE.aspx" />
     <Content Include="favicon.ico" />
+    <Content Include="PQIByEvent.aspx" />
     <Content Include="Scripts\bootstrap-3.3.2.min.js" />
     <Content Include="Scripts\bootstrap-multiselect.js" />
     <Content Include="Scripts\bootstrap.js" />
@@ -466,102 +523,39 @@
     <Content Include="fonts\fontawesome-webfont.woff2" />
     <Content Include="fonts\FontAwesome.otf" />
     <Content Include="Content\graphics\outlines\Outlines.psd" />
+    <Content Include="Content\fonts\jsglyph.eot" />
+    <Content Include="Content\fonts\jsglyph.ttf" />
+    <Content Include="Content\fonts\jsglyph.woff" />
+    <Content Include="Content\fonts\fontawesome-webfont.eot" />
+    <Content Include="Content\fonts\fontawesome-webfont.ttf" />
+    <Content Include="Content\fonts\fontawesome-webfont.woff" />
+    <Content Include="Content\fonts\fontawesome-webfont.woff2" />
+    <Content Include="Content\fonts\FontAwesome.otf" />
+    <Content Include="Content\fonts\glyphicons-halflings-regular.eot" />
+    <Content Include="Content\fonts\glyphicons-halflings-regular.ttf" />
+    <Content Include="Content\fonts\glyphicons-halflings-regular.woff" />
+    <Content Include="Content\fonts\glyphicons-halflings-regular.woff2" />
     <None Include="Properties\PublishProfiles\desktop.pubxml" />
     <None Include="Properties\PublishProfiles\dev.pubxml" />
     <Content Include="Scripts\D3\LICENSE" />
+    <Content Include="Scripts\daterangepicker.js" />
     <Content Include="Scripts\flot\API.md" />
     <Content Include="Scripts\flot\CONTRIBUTING.md" />
-    <Content Include="Scripts\flot\examples\.DS_Store" />
-    <Content Include="Scripts\flot\examples\ajax\data-eu-gdp-growth-1.json" />
-    <Content Include="Scripts\flot\examples\ajax\data-eu-gdp-growth-2.json" />
-    <Content Include="Scripts\flot\examples\ajax\data-eu-gdp-growth-3.json" />
-    <Content Include="Scripts\flot\examples\ajax\data-eu-gdp-growth-4.json" />
-    <Content Include="Scripts\flot\examples\ajax\data-eu-gdp-growth-5.json" />
-    <Content Include="Scripts\flot\examples\ajax\data-eu-gdp-growth.json" />
-    <Content Include="Scripts\flot\examples\ajax\data-japan-gdp-growth.json" />
-    <Content Include="Scripts\flot\examples\ajax\data-usa-gdp-growth.json" />
-    <Content Include="Scripts\flot\examples\axes-time-zones\tz\africa" />
-    <Content Include="Scripts\flot\examples\axes-time-zones\tz\antarctica" />
-    <Content Include="Scripts\flot\examples\axes-time-zones\tz\asia" />
-    <Content Include="Scripts\flot\examples\axes-time-zones\tz\australasia" />
-    <Content Include="Scripts\flot\examples\axes-time-zones\tz\backward" />
-    <Content Include="Scripts\flot\examples\axes-time-zones\tz\etcetera" />
-    <Content Include="Scripts\flot\examples\axes-time-zones\tz\europe" />
-    <Content Include="Scripts\flot\examples\axes-time-zones\tz\factory" />
-    <Content Include="Scripts\flot\examples\axes-time-zones\tz\iso3166.tab" />
-    <Content Include="Scripts\flot\examples\axes-time-zones\tz\leapseconds" />
-    <Content Include="Scripts\flot\examples\axes-time-zones\tz\northamerica" />
-    <Content Include="Scripts\flot\examples\axes-time-zones\tz\pacificnew" />
-    <Content Include="Scripts\flot\examples\axes-time-zones\tz\solar87" />
-    <Content Include="Scripts\flot\examples\axes-time-zones\tz\solar88" />
-    <Content Include="Scripts\flot\examples\axes-time-zones\tz\solar89" />
-    <Content Include="Scripts\flot\examples\axes-time-zones\tz\southamerica" />
-    <Content Include="Scripts\flot\examples\axes-time-zones\tz\systemv" />
-    <Content Include="Scripts\flot\examples\axes-time-zones\tz\yearistype.sh" />
-    <Content Include="Scripts\flot\examples\axes-time-zones\tz\zone.tab" />
     <Content Include="Scripts\flot\FAQ.md" />
     <Content Include="Scripts\flot\Makefile" />
     <Content Include="Scripts\flot\NEWS.md" />
     <Content Include="Scripts\flot\PLUGINS.md" />
     <Content Include="Scripts\flot\README.md" />
-    <None Include="Properties\PublishProfiles\web.pubxml" />
     <None Include="Scripts\jquery-2.2.3.intellisense.js" />
     <Content Include="Scripts\ChannelDataCompleteness.js" />
     <Content Include="Scripts\ChannelDataQuality.js" />
     <Content Include="Scripts\CustomGoogleMapMarker.js" />
-    <Content Include="Scripts\D3\conrec.js" />
-    <Content Include="Scripts\D3\d3-color.v1.min.js" />
-    <Content Include="Scripts\D3\d3-interpolate.v1.min.js" />
-    <Content Include="Scripts\D3\d3-scale.v1.min.js" />
-    <Content Include="Scripts\D3\d3-shape.v1.min.js" />
-    <Content Include="Scripts\D3\d3.geom.contour.js" />
-    <Content Include="Scripts\D3\d3.geom.contour.min.js" />
+    <Content Include="Scripts\D3\d3-color.v1.js" />
+    <Content Include="Scripts\D3\d3-interpolate.v1.js" />
+    <Content Include="Scripts\D3\d3-scale.v1.js" />
+    <Content Include="Scripts\D3\d3-shape.v1.js" />
     <Content Include="Scripts\D3\d3.js" />
-    <Content Include="Scripts\D3\d3.min.js" />
-    <Content Include="Scripts\D3\marchingsquares-isobands.js" />
-    <Content Include="Scripts\D3\marchingsquares-isobands.min.js" />
-    <Content Include="Scripts\D3\marchingsquares-isocontours.js" />
-    <Content Include="Scripts\D3\marchingsquares-isocontours.min.js" />
-    <Content Include="Scripts\D3\turf.custom.js" />
     <Content Include="Scripts\Default.js" />
-    <Content Include="Scripts\flot\examples\ajax\index.html" />
-    <Content Include="Scripts\flot\examples\annotating\index.html" />
-    <Content Include="Scripts\flot\examples\axes-interacting\index.html" />
-    <Content Include="Scripts\flot\examples\axes-multiple\index.html" />
-    <Content Include="Scripts\flot\examples\axes-time-zones\date.js" />
-    <Content Include="Scripts\flot\examples\axes-time-zones\index.html" />
-    <Content Include="Scripts\flot\examples\axes-time\index.html" />
-    <Content Include="Scripts\flot\examples\background.png" />
-    <Content Include="Scripts\flot\examples\basic-options\index.html" />
-    <Content Include="Scripts\flot\examples\basic-usage\index.html" />
-    <Content Include="Scripts\flot\examples\canvas\index.html" />
-    <Content Include="Scripts\flot\examples\categories\index.html" />
-    <Content Include="Scripts\flot\examples\examples.css" />
-    <Content Include="Scripts\flot\examples\image\hs-2004-27-a-large-web.jpg" />
-    <Content Include="Scripts\flot\examples\image\index.html" />
-    <Content Include="Scripts\flot\examples\index.html" />
-    <Content Include="Scripts\flot\examples\interacting\index.html" />
-    <Content Include="Scripts\flot\examples\navigate\arrow-down.gif" />
-    <Content Include="Scripts\flot\examples\navigate\arrow-left.gif" />
-    <Content Include="Scripts\flot\examples\navigate\arrow-right.gif" />
-    <Content Include="Scripts\flot\examples\navigate\arrow-up.gif" />
-    <Content Include="Scripts\flot\examples\navigate\index.html" />
-    <Content Include="Scripts\flot\examples\percentiles\index.html" />
-    <Content Include="Scripts\flot\examples\realtime\index.html" />
-    <Content Include="Scripts\flot\examples\resize\index.html" />
-    <Content Include="Scripts\flot\examples\selection\index.html" />
-    <Content Include="Scripts\flot\examples\series-errorbars\index.html" />
-    <Content Include="Scripts\flot\examples\series-pie\index.html" />
-    <Content Include="Scripts\flot\examples\series-toggle\index.html" />
-    <Content Include="Scripts\flot\examples\series-types\index.html" />
-    <Content Include="Scripts\flot\examples\shared\jquery-ui\jquery-ui.min.css" />
-    <Content Include="Scripts\flot\examples\shared\jquery-ui\jquery-ui.min.js" />
-    <Content Include="Scripts\flot\examples\stacking\index.html" />
-    <Content Include="Scripts\flot\examples\symbols\index.html" />
-    <Content Include="Scripts\flot\examples\threshold\index.html" />
-    <Content Include="Scripts\flot\examples\tracking\index.html" />
-    <Content Include="Scripts\flot\examples\visitors\index.html" />
-    <Content Include="Scripts\flot\examples\zooming\index.html" />
     <Content Include="Scripts\flot\excanvas.js" />
     <Content Include="Scripts\flot\excanvas.min.js" />
     <Content Include="Scripts\flot\jquery.colorhelpers.js" />
@@ -601,14 +595,16 @@
     <Content Include="Scripts\flot\jquery.min.js" />
     <Content Include="Scripts\flot\LICENSE.txt" />
     <Content Include="Scripts\heatmap.js" />
+    <Content Include="Scripts\ie11-compatibility-functions.js" />
     <Content Include="Scripts\jquery-2.1.1.js" />
     <Content Include="Scripts\jquery-2.1.3.min.js" />
     <Content Include="Scripts\jquery-2.2.3.js" />
     <Content Include="Scripts\jquery-2.2.3.min.js" />
     <Content Include="Scripts\jquery-ui.js" />
     <Content Include="Scripts\jquery.blockUI.js" />
-    <Content Include="Scripts\jquery.multiselect.filter.js" />
-    <Content Include="Scripts\jquery.multiselect.js" />
+    <Content Include="Scripts\jquery.jspanel-compiled.js" />
+    <Content Include="Scripts\jquery.jspanel.js" />
+    <Content Include="Scripts\jquery.jspanel.min.js" />
     <Content Include="Scripts\jquery.signalR-2.2.0.js" />
     <Content Include="Scripts\jquery.signalR-2.2.0.min.js" />
     <None Include="Scripts\jquery.validate-vsdoc.js" />
@@ -617,6 +613,7 @@
     <Content Include="Scripts\jquery.validate.min.js" />
     <Content Include="Scripts\jquery.validate.unobtrusive.js" />
     <Content Include="Scripts\jquery.validate.unobtrusive.min.js" />
+    <Content Include="Scripts\jscolor.js" />
     <Content Include="Scripts\jstorage.js" />
     <Content Include="Scripts\keydragzoom.js" />
     <Content Include="Scripts\knockout-3.4.0.debug.js" />
@@ -636,14 +633,16 @@
     <Content Include="Scripts\Leaflet\leaflet.js" />
     <Content Include="Scripts\Leaflet\leaflet1.0.css" />
     <Content Include="Scripts\Leaflet\leaflet1.0.js" />
-    <Content Include="Scripts\MeterDisturbancesByLine.js" />
-    <Content Include="Scripts\MeterEventsByLine.js" />
-    <Content Include="Scripts\ModbusData.js" />
+    <Content Include="Scripts\masonry.pkdg.min.js" />
+    <Content Include="Scripts\masonry.pkgd.js" />
+    <Content Include="Scripts\MeterActivity.js" />
     <Content Include="Scripts\modernizr-2.8.3.js" />
     <Content Include="Scripts\moment.js" />
     <Content Include="Scripts\OpenLayersDraggable.js" />
     <Content Include="Scripts\OpenSEE.js" />
+    <Content Include="Scripts\OpenSEEold.js" />
     <Content Include="Scripts\OpenSTE.js" />
+    <Content Include="Scripts\plotly-latest.min.js" />
     <Content Include="Scripts\PQIByEvent.js" />
     <Content Include="Scripts\prettify.js" />
     <Content Include="Scripts\PrimeUI\Font-Awesome\css\font-awesome.css" />
@@ -654,6 +653,7 @@
     <Content Include="Scripts\PrimeUI\images\loadingbar.gif" />
     <Content Include="Scripts\PrimeUI\images\password-meter.png" />
     <Content Include="Scripts\PrimeUI\images\rating.png" />
+    <Content Include="Scripts\overview.js" />
     <Content Include="Scripts\PrimeUI\plugins\cursorposition.js" />
     <Content Include="Scripts\PrimeUI\plugins\jquery.mousewheel.js" />
     <Content Include="Scripts\PrimeUI\plugins\mustache.min.js" />
@@ -1253,7 +1253,9 @@
     <None Include="Scripts\_references.js" />
     <Content Include="Scripts\Site.js" />
     <Content Include="signalService.asmx" />
-    <Content Include="Web.config" />
+    <Content Include="Web.config">
+      <SubType>Designer</SubType>
+    </Content>
     <Content Include="Web.Debug.config">
       <DependentUpon>Web.config</DependentUpon>
     </Content>
@@ -1282,6 +1284,11 @@
     <Content Include="Views\System\ValueListGroups.cshtml" />
     <Content Include="Views\System\ValueListItems.cshtml" />
     <Content Include="Views\Main\GraphMeasurements.cshtml" />
+    <Content Include="Views\Main\OpenSEE.cshtml" />
+    <Content Include="Views\Main\OpenSTE.cshtml" />
+    <Content Include="Views\Main\MeterEventsByLine.cshtml" />
+    <Content Include="Views\Main\MeterDisturbancesByLine.cshtml" />
+    <Content Include="Views\Main\MeterExtensionsByLine.cshtml" />
   </ItemGroup>
   <ItemGroup>
     <Folder Include="App_Data\" />
@@ -1293,6 +1300,9 @@
     <None Include="Project_Readme.html" />
     <Content Include="Scripts\jquery-2.2.3.min.map" />
     <Content Include="Scripts\knockout.validation.min.js.map" />
+  </ItemGroup>
+  <ItemGroup>
+    <WCFMetadata Include="Service References\" />
   </ItemGroup>
   <PropertyGroup>
     <VisualStudioVersion Condition="'$(VisualStudioVersion)' == ''">10.0</VisualStudioVersion>

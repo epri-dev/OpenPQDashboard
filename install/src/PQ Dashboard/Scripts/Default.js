@@ -24,15 +24,9 @@
 
 var base64Map = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'.split('');
 
-var globalcolorsBreakers = ['#90ed7d', '#434348', '#ff0000'];
-var globalcolorsTrending = ['#434348', '#ff0000'];
 
 var globalcolors = ['#90ed7d', '#434348', '#ff0000', '#f7a35c', '#8085e9', '#f15c80', '#e4d354', '#2b908f', '#f45b5b', '#91e8e1'];
-var globalcolorsFaults = [ '#2b908f', '#e4d354', '#f15c80', '#8085e9', '#f7a35c', '#90ed7d', '#434348', '#ff0000'];
-//var globalcolorsEvents = ['#C00000', '#FF2800', '#FF9600', '#FFFF00', '#00FFF4', '#0000FF'];
 var globalcolorsEvents = ['#0000FF', '#00FFF4', '#FFFF00', '#FF9600', '#FF2800', '#C00000'];
-//var globalcolorsDQ = ['#00FFF4', '#00C80E', '#FFFF00', '#FF9600', '#FF2800', '#FF0EF0', '#0000FF'];
-var globalcolorsDQ = ['#0000FF', '#FF0EF0', '#FF2800', '#FF9600', '#FFFF00', '#00C80E', '#00FFF4'];
 
 var javascriptversion = "13";
 
@@ -44,6 +38,98 @@ var usersettings = {
 var applicationsettings = {};
 
 var cache_Meters = null;
+var meterList = null;
+
+// define MeterListClass object in a terrible way so that IE11 will accept it...
+var MeterListClass = function(meterList){
+    this.list = deepCopy(meterList);
+
+    $.each(this.list, function (_, meter) {
+        meter.Selected = true;
+        meter.MeterGroups = [0];
+        meter.Displayed = true;
+    });
+};
+
+MeterListClass.prototype.selected = function(){
+    return $.grep(this.list, function (a) { if (a.Selected) return a }).map(function(a){ return a.Name + "|" + a.ID});
+};
+
+MeterListClass.prototype.selectedIds = function() {
+    return $.grep(this.list, function (a) { if (a.Selected) return a }).map(function (a) { return a.ID });
+};
+
+MeterListClass.prototype.displayedIds = function () {
+    return $.grep(this.list, function (a) { if (a.Selected) return a }).map(function (a) { return a.ID });
+};
+
+MeterListClass.prototype.ids = function () {
+    return this.list.map(function (a) { return a.ID });
+};
+
+MeterListClass.prototype.selectedIdsString = function () {
+    return this.selectedIds().join(',');
+};
+
+MeterListClass.prototype.count = function () {
+    return this.list.length;
+};
+
+MeterListClass.prototype.selectedCount = function () {
+    return this.selectedIds().length;
+};
+
+MeterListClass.prototype.unselectAll = function () {
+    $.each(this.list, function (_, meter) {
+        meter.Selected = false;
+    });
+};
+
+MeterListClass.prototype.resetDisplayAll = function () {
+    $.each(this.list, function (_, meter) {
+        meter.Selected = false;
+        meter.Displayed = false;
+    });
+};
+
+MeterListClass.prototype.setDisplayed = function (id, boolean) {
+    var index = this.indexOf(id);
+    this.list[index].Displayed = boolean;
+};
+
+MeterListClass.prototype.setSelected = function (id, boolean) {
+    var index = this.indexOf(id);
+    this.list[index].Selected = boolean;
+};
+
+
+MeterListClass.prototype.selectById = function (id) {
+    $.each(this.list, function (_, meter) {
+        if(meter.ID == id)
+        meter.Selected = true;
+    });
+};
+
+MeterListClass.prototype.indexOf = function (id) {
+    return this.list.findIndex(function (a) { return a.ID == id });
+};
+
+MeterListClass.prototype.addMeterGroup = function (meterId, meterGroupId) {
+    var index = this.indexOf(meterId);
+    if(this.list[index].MeterGroups.indexOf(meterGroupId) < 0)
+        this.list[index].MeterGroups.push(meterGroupId);
+};
+
+MeterListClass.prototype.addMeter = function (meter) {
+    meter.Selected = true;
+    meter.MeterGroups = [0];
+    meter.Displayed = true;
+    
+    if (this.indexOf(meter.ID) < 0)
+        this.list.push(meter);
+};
+
+
 
 var cache_Map_Matrix_Data = null;
 var cache_Map_Matrix_Data_Date_From = null;
@@ -51,17 +137,64 @@ var cache_Map_Matrix_Data_Date_To = null;
 
 // Billy's cached data
 var cache_Graph_Data = null;
-var cache_ErrorBar_data = null;
+var cache_ErrorBar_Data = null;
 var cache_Table_Data = null;
 var cache_Contour_Data = null;
+var cache_Sparkline_Data = null; 
 var brush = null;
 var cache_Last_Date = null;
-var leafletMap = {'Overview-Today': null, 'Overview-Yesterday': null, Events: null, Disturbances: null, Trending: null, TrendingData: null, Faults: null, Breakers: null, Completeness: null, Correctness: null, ModbusData: null};
+var cache_Meter_Filter = null;
+var cache_MagDur_Data = null;
+
+var leafletMap = {'MeterActivity': null, 'Overview-Today': null, 'Overview-Yesterday': null, Events: null, Disturbances: null, Extensions: null,Trending: null, TrendingData: null, Faults: null, Breakers: null, Completeness: null, Correctness: null, ModbusData: null};
 var markerGroup = null;
 var contourLayer = null;
 var contourOverlay = null;
-var mapMarkers = {Events: [], Disturbances: [], Trending: [], TrendingData: [], Faults: [], Breakers: [], Completeness: [], Correctness: []};
+var mapMarkers = {Events: [], Disturbances: [], Trending: [], TrendingData: [], Faults: [], Breakers: [], Completeness: [], Correctness: [], Extensions: []};
 var currentTab = null;
+var disabledList = {
+    Events: { "Interruption": false, "Fault": false, "Sag": false, "Transient": false, "Swell": false, "Other": false },
+    Disturbances: {"5": false, "4": false, "3": false, "2": false, "1": false, "0": false},
+    Trending: { "Alarm": false, "OffNormal": false},
+    TrendingData: {},
+    Faults: { "500 kV": false, "300 kV": false, "230 kV": false, "135 kV": false, "115 kV": false, "69 kV": false, "46 kV": false, "0 kV": false},
+    Breakers: {"Normal" : false, "Late": false, "Indeterminate": false},
+    Completeness: {"> 100%": false, "98% - 100%": false, "90% - 97%": false, "70% - 89%": false, "50% - 69%": false, ">0% - 49%": false, "0%": false},
+    Correctness: { "> 100%": false, "98% - 100%": false, "90% - 97%": false, "70% - 89%": false, "50% - 69%": false, ">0% - 49%": false, "0%": false},
+    Extensions: {}
+};
+
+var yearBeginMoment = moment().month(yearBegin.split(' ')[0]).startOf('month').date(yearBegin.split(' ')[1]).utc();
+var nowMoment = moment.utc();
+var dateRangeOptions = {
+    "timePicker": false,
+    "timePicker24Hour": false,
+    "timePickerSeconds": false,
+    "locale": {
+        "format": 'MM/DD/YYYY'
+    },
+    "showDropdowns": true,
+    "autoApply": true,
+    "alwaysShowCalendars": true,
+    "minDate": "01/01/1990",
+    "maxDate": "12/31/2030",
+    "ranges": {
+        //'1 Day': [moment().utc().startOf('day'), moment().utc().endOf('day')],
+        'Last 3 Days': [moment().utc().startOf('day').subtract(2, 'days'), moment().utc().endOf('day')],
+        'Last 7 Days': [moment().utc().startOf('day').subtract(6, 'days'), moment().utc().endOf('day')],
+        'Last 30 Days': [moment().utc().startOf('day').subtract(29, 'days'), moment().utc().endOf('day')],
+        'Last 90 Days': [moment().utc().startOf('day').subtract(89, 'days'), moment().utc().endOf('day')],
+        'Last 365 Days': [moment().utc().startOf('day').subtract(364, 'days'), moment().utc().endOf('day')],
+        'Month To Date': [moment().utc().startOf('month'), moment().utc().endOf('day')],
+        'Last Month': [moment().utc().subtract(1, 'months').startOf('month'), moment().utc().subtract(1, 'months').endOf('month')],
+        'Year To Date': [(nowMoment >= yearBeginMoment ? yearBeginMoment.clone() : yearBeginMoment.clone().subtract(1,'years')), moment().utc().endOf('day')],
+        'Last Year': [(nowMoment >= yearBeginMoment ? yearBeginMoment.clone().subtract(1, 'years') : yearBeginMoment.clone().subtract(2, 'years')),
+                       (nowMoment >= yearBeginMoment ? yearBeginMoment.clone() : yearBeginMoment.clone().subtract(1, 'years'))],
+    },
+    "startDate": moment().utc().subtract(29, 'days').startOf('day'),
+    "endDate": moment.utc().endOf('day')
+};
+
 
 var calendardatesEvents = [];
 var calendartipsEvents = [];
@@ -89,9 +222,10 @@ var lastselectedindex = 0;
 
 var heatmap_Cache_Date_From;
 var heatmap_Cache_Date_To;
-var heatmapCache = new Array();
+var heatmapCache = [];
 
 var postedUserName = "";
+var globalContext = "custom";
 
 //////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -103,42 +237,93 @@ Array.prototype.remove = function (from, to) {
 
 //////////////////////////////////////////////////////////////////////////////////////////////
 
-function loadDataForDateClick() {
-    $("#staticPeriod")[0].value = "Custom";
-    loadDataForDate();
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////////
-
 function setMapHeaderDate(datefrom, dateto) {
-
-    if (datefrom == dateto) {
-        $("#mapHeader" + currentTab + "From").hide();
-        $("#mapHeader" + currentTab + "Divider").hide();
-    } else {
+    if (globalContext == "custom") {
         $("#mapHeader" + currentTab + "From").show();
         $("#mapHeader" + currentTab + "Divider").show();
+        $("#mapHeader" + currentTab + "From").text(moment(datefrom).utc().format('MM/DD/YY'));
+        $("#mapHeader" + currentTab + "To").text(moment(dateto).utc().format('MM/DD/YY'));
+        $('.contextWindow').text('Date Range');
+        $('.stepOutBtn').attr('disabled', true)
     }
-        
-    $("#mapHeader" + currentTab + "From")[0].innerHTML = (new  Date(datefrom).getMonth() + 1)+ '/' + new Date(datefrom).getDate() + '/' + new Date(datefrom).getFullYear() ;
-    $("#mapHeader" + currentTab + "To")[0].innerHTML = (new Date(dateto).getMonth() + 1) + '/' + new Date(dateto).getDate() + '/' + new Date(dateto).getFullYear();
+    else if (globalContext == "day") {
+        $("#mapHeader" + currentTab + "From").hide();
+        $("#mapHeader" + currentTab + "Divider").hide();
+        $("#mapHeader" + currentTab + "From").text(moment(datefrom).utc().format('MM/DD/YY'));
+        $("#mapHeader" + currentTab + "To").text(moment(dateto).utc().format('MM/DD/YY'));
+        $('.contextWindow').text(moment(datefrom).utc().format('MM/DD/YY'));
+        $('.stepOutBtn').attr('disabled', false)
+    }
+    else if (globalContext == "hour") {
+        $("#mapHeader" + currentTab + "From").hide();
+        $("#mapHeader" + currentTab + "Divider").hide();
+        $("#mapHeader" + currentTab + "From").text(moment(datefrom).utc().format('MM/DD/YY'));
+        $("#mapHeader" + currentTab + "To").text(moment(dateto).utc().format('MM/DD/YY  HH:00'));
+        $('.contextWindow').text(moment(datefrom).utc().format('MM/DD/YY HH:00'));
+        $('.stepOutBtn').attr('disabled', false)
+
+    }
+    else if (globalContext == "minute") {
+        $("#mapHeader" + currentTab + "From").hide();
+        $("#mapHeader" + currentTab + "Divider").hide();
+        $("#mapHeader" + currentTab + "From").text(moment(datefrom).utc().format('MM/DD/YY'));
+        $("#mapHeader" + currentTab + "To").text(moment(dateto).utc().format('MM/DD/YY  HH:mm'));
+        $('.contextWindow').text(moment(datefrom).utc().format('MM/DD/YY HH:mm'));
+        $('.stepOutBtn').attr('disabled', false)
+    }
+    else if (globalContext == "second") {
+        $("#mapHeader" + currentTab + "From").hide();
+        $("#mapHeader" + currentTab + "Divider").hide();
+        $("#mapHeader" + currentTab + "From").text(moment(datefrom).utc().format('MM/DD/YY'));
+        $("#mapHeader" + currentTab + "To").text(moment(dateto).utc().format('MM/DD/YY  HH:mm:ss'));
+        $('.contextWindow').text(moment(datefrom).utc().format('MM/DD/YY HH:mm:ss'));
+        $('.stepOutBtn').attr('disabled', false)
+    }
+
 }
 
-//////////////////////////////////////////////////////////////////////////////////////////////
-
-function getMapHeaderDate(whichdate) {
-    return ($("#mapHeader" + currentTab + whichdate)[0].innerHTML);
+function setGlobalContext(leftToRight) {
+    var contexts = ['custom', 'day', 'hour', 'minute', 'second'];
+    if (leftToRight)
+    {
+        if(contexts.indexOf(globalContext) < contexts.length - 1)
+            globalContext = contexts[contexts.indexOf(globalContext) + 1];
+    }
+    else {
+        if (contexts.indexOf(globalContext) > 0)
+            globalContext = contexts[contexts.indexOf(globalContext) - 1];
+    }
 }
-
 //////////////////////////////////////////////////////////////////////////////////////////////
 
 function loadDataForDate() {
     if (currentTab != null) {
-        var fromdate = new Date($.datepicker.formatDate("mm/dd/yy", $('#datePickerFrom').datepicker('getDate')));
-        var todate = new Date($.datepicker.formatDate("mm/dd/yy", $('#datePickerTo').datepicker('getDate')));
 
-        contextfromdate = getFormattedDate(fromdate);
-        contexttodate = getFormattedDate(todate);
+        if (globalContext == "custom") {
+            contextfromdate = moment($('#dateRange').data('daterangepicker').startDate._d.toISOString()).utc().format('YYYY-MM-DD') + "T00:00:00Z";
+            contexttodate = moment($('#dateRange').data('daterangepicker').endDate._d.toISOString()).utc().format('YYYY-MM-DD') + "T00:00:00Z";
+        }
+        else if (globalContext == "day") {
+            contextfromdate = moment(contextfromdate).utc().startOf('day').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+            contexttodate = moment(contextfromdate).utc().endOf('day').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+        }
+        else if (globalContext == "hour") {
+            contextfromdate = moment(contextfromdate).utc().startOf('hour').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+            contexttodate = moment(contextfromdate).utc().endOf('hour').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+        }
+        else if (globalContext == "minute") {
+            contextfromdate = moment(contextfromdate).utc().startOf('minute').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+            contexttodate = moment(contextfromdate).utc().endOf('minute').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+        }
+        else if (globalContext == "second") {
+            contextfromdate = moment(contextfromdate).utc().startOf('second').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+            contexttodate = moment(contextfromdate).utc().endOf('second').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+        }
+        else {
+            contextfromdate = moment(contextfromdate).utc();
+            contexttodate = moment(contextfromdate).utc();
+        }
+
 
         cache_Map_Matrix_Data_Date_From = contextfromdate;
         cache_Map_Matrix_Data_Date_To = contexttodate;
@@ -149,6 +334,7 @@ function loadDataForDate() {
         else {
             cache_Last_Date = null;
             cache_Table_Data = null;
+            cache_Sparkline_Data = null;
         }
 
         setMapHeaderDate(contextfromdate, contexttodate);
@@ -159,42 +345,24 @@ function loadDataForDate() {
 //////////////////////////////////////////////////////////////////////////////////////////////
 
 function selectmapgrid(thecontrol) {
-    if (thecontrol.selectedIndex === 1) {
-        $("#theMatrix" + currentTab).show();
-        $("#theMap" + currentTab).hide();
-        if (cache_Map_Matrix_Data != null) {
-            plotGridLocations(cache_Map_Matrix_Data, currentTab, cache_Map_Matrix_Data_Date_From, cache_Map_Matrix_Data_Date_To);  
+    if(thecontrol != null){
+        $('.mapGrid').val($(thecontrol).val());
+        if (thecontrol.selectedIndex === 1) {
+            $("#theMatrix" + currentTab).show();
+            $("#theMap" + currentTab).hide();
+            if (cache_Map_Matrix_Data != null) {
+                plotGridLocations(cache_Map_Matrix_Data, currentTab, cache_Map_Matrix_Data_Date_From, cache_Map_Matrix_Data_Date_To);  
+            }
+            $.sparkline_display_visible();
+            updateGridWithSelectedSites();
         }
-        $.sparkline_display_visible();
-        updateGridWithSelectedSites();
+        else if (thecontrol.selectedIndex === 0) {
+            //$("#ContoursControlsTrending").hide();
+            $("#theMap" + currentTab).show();
+            $("#theMatrix" + currentTab).hide();
+            resizeMapAndMatrix(currentTab);
+        }
     }
-     else if (thecontrol.selectedIndex === 0) {
-        //$("#ContoursControlsTrending").hide();
-        $("#theMap" + currentTab).show();
-        $("#theMatrix" + currentTab).hide();
-        resizeMapAndMatrix(currentTab);
-    }
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////////
-
-function GetAllSitesIDs() {
-
-    var returnValue = "";
-
-    $.each(cache_Map_Matrix_Data.d, function (key, value) {
-        returnValue += value.id + ",";
-    });
-
-    return (returnValue);
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////////
-
-function GetCurrentlySelectedSites() {
-    return ($('#siteList').multiselect("getChecked").map(function() {
-        return this.title + "|" + this.value;
-    }).get());
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////
@@ -203,135 +371,149 @@ function selectsitesincharts() {
 
     selectiontimeout = null;
 
-    var selectedIDs = GetCurrentlySelectedSites();
-
-    var sitename = selectedIDs.length + " of " + $('#siteList')[0].length + " selected";
+    var sitename = meterList.selectedCount() + " of " + meterList.count() + " selected";
     var thesiteidlist = "";
 
-    if (selectedIDs.length > 0) {
+    if (meterList.selectedCount() > 0) {
 
-        var thedetails = selectedIDs[0].split('|');
+        var thedetails = meterList.selected()[0].split('|');
 
-        if (selectedIDs.length == 1) {
+        if (meterList.selectedCount() == 1) {
             sitename = thedetails[0];
         }
 
-        $.each(selectedIDs, function(key, value) {
+        $.each(meterList.selected(), function (key, value) {
             thedetails = value.split('|');
             thesiteidlist += thedetails[1] + ",";
         });
     }
 
     if (cache_Last_Date !== null) {
-        getTableDivData('getDetailsForSites' + currentTab, 'Detail' + currentTab, sitename, thesiteidlist, cache_Last_Date);
+        getTableDivData('getDetailsForSites' + currentTab, 'Detail' + currentTab, thesiteidlist, cache_Last_Date);
     } else {
         var parent = $('#Detail' + currentTab + 'Table').parent();
         $('#Detail' + currentTab + 'Table').remove();
         $(parent).append('<div id="Detail' + currentTab + 'Table"></div>');
     }
 
-    ManageLocationClick(sitename, thesiteidlist);  
+    ManageLocationClick(thesiteidlist);  
 }
 
-function selectsitesonmap() {
-
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////////
-
-function populateLocationDropdownWithSelection( ax, ay, bx, by ) {
-            
-    var thedatasent = "{'ax':'" + ax + "', 'ay':'" + ay + "', 'bx':'" + bx + "', 'by':'" + by + "', 'userName':'" + postedUserName + "'}";
-
-    $.ajax({
-        type: "POST",
-        url: homePath +'/mapService.asmx/getMeterIDsForArea',
-        data: thedatasent,
-        contentType: "application/json; charset=utf-8",
-        dataType: 'json',
-        cache: true,
-        success: function (data) {
-            $('#siteList').val(data.d);
-            $('#siteList').multiselect("refresh");
-            selectsitesonmap();
-            selectsitesincharts();
-            showSiteSet($("#selectSiteSet" + currentTab)[0]);
-        },
-        failure: function (msg) {
-            alert(msg);
-        },
-        async: true
-    });
-}
 
 //////////////////////////////////////////////////////////////////////////////////////////////
 // The following functions are for getting Table data and populating the tables
-function getTableDivData(thedatasource, thediv, siteName, siteID, theDate) {
-    var thedatasent = "{'siteID':'" + siteID + "'" +
-                    (currentTab === "TrendingData" ? ", 'colorScale': '" + $('#contourColorScaleSelect').val() + "'" : "") +
-                    ", 'targetDate':'" + theDate + "'" +
-                    ", 'userName':'" + postedUserName + "'}";
+function getTableDivData(thedatasource, thediv, siteID, theDate) {
+    dataHub.getDetailsForSites(siteID, theDate, userId, currentTab, $('#contourColorScaleSelect').val(), globalContext).done(function (data) {
+        var json = $.parseJSON(data)
+        cache_Table_Data = json;
 
-    $.ajax({
-        type: "POST",
-        url: homePath +'/eventService.asmx/' + thedatasource,
-        data: thedatasent,
-        contentType: "application/json; charset=utf-8",
-        dataType: 'json',
-        cache: true,
-        success: function (data) {
-            var json = $.parseJSON(data.d)
-            cache_Table_Data = json;
+        var filterString = [];
+        var leg = d3.selectAll('.legend');
 
-            var filterString = [];
-            var leg = d3.selectAll('.legend');
-
-            $.each(leg[0], function (i, d) {
-                if ($(d).children('rect').css('fill') === 'rgb(128, 128, 128)')
-                    filterString.push($(d).children('text').text());
-            });
-            window["populate" + currentTab + "DivWithGrid"](json, filterString);
-        }
-    });
-}
-
-function populateFaultsDivWithGrid(data, disabledFields) {
-    if ($('#Detail' + currentTab + 'Table').children().length > 0) {
-        var parent = $('#Detail' + currentTab + 'Table').parent();
-        $('#Detail' + currentTab + 'Table').remove();
-        $(parent).append('<div id="Detail' + currentTab + 'Table"></div>');
-    }
-
-    var filteredData = [];
-    if (disabledFields !== null) {
-        $.each(data, function (i, d) {
-            if(disabledFields.indexOf(d.voltage + ' kV') < 0)
-                filteredData.push(d);
+        $.each(leg[0], function (i, d) {
+            if ($(d).children('rect').css('fill') === 'rgb(128, 128, 128)')
+                filterString.push($(d).children('text').text());
         });
-    } else {
-        filteredData = data;
-    }
-
-    fixNumbers(data, ['voltage', 'thecurrentdistance']);
-
-    $('#Detail' + currentTab + "Table").puidatatable({
-        scrollable: true,
-        scrollHeight: '100%',
-        columns: [
-            { field: 'theinceptiontime', headerText: 'Start Time', headerStyle: 'width: 15%', bodyStyle: 'width: 15%; height: 20px', sortable: true },
-            { field: 'thelinename', headerText: 'Line', headerStyle: 'width: 40%', bodyStyle: 'width: 40%; height: 20px', sortable: true },
-            { field: 'voltage', headerText: 'kV', headerStyle: 'width: 6%', bodyStyle: 'width:  6%; height: 20px', sortable: true },
-            { field: 'thefaulttype', headerText: 'Type', headerStyle: 'width:  6%', bodyStyle: 'width:  6%; height: 20px', sortable: true },
-            { field: 'thecurrentdistance', headerText: 'Miles', headerStyle: 'width:  6%', bodyStyle: 'width:  6%; height: 20px', sortable: true },
-            { field: 'locationname', headerText: 'Location', headerStyle: 'width: 10%', bodyStyle: 'width: 10%; height: 20px', sortable: true },
-            { field: 'OpenSEE', headerText: '', headerStyle: 'width: 4%', bodyStyle: 'width: 4%; padding: 0; height: 20px', content: makeOpenSEEButton_html },
-            { field: 'FaultSpecifics', headerText: '', headerStyle: 'width: 4%', bodyStyle: 'width: 4%; padding: 0; height: 20px', content: makeFaultSpecificsButton_html }
-        ],
-        datasource: filteredData
+        window["populate" + currentTab + "DivWithGrid"](cache_Table_Data);
     });
 }
 
-function populateCorrectnessDivWithGrid(data, disabledFields) {
+function populateFaultsDivWithGrid(data) {
+    if ($('#Detail' + currentTab + 'Table').children().length > 0) {
+        var parent = $('#Detail' + currentTab + 'Table').parent();
+        $('#Detail' + currentTab + 'Table').remove();
+        $(parent).append('<div id="Detail' + currentTab + 'Table"></div>');
+    }
+    $('#DockDetailFaults').css('width', '100%');
+
+    var filteredData = [];
+    var includeCauseCode = false;
+    if (data != null) {
+
+        $.each(data, function (i, d) {
+            if (!disabledList[currentTab][d.voltage + ' kV']) {
+                filteredData.push(d);
+
+                if (d.causecode !== undefined)
+                    includeCauseCode = true;
+            }
+        });
+
+        var columns = [];
+
+        columns.push({
+            field: 'theinceptiontime',
+            headerText: 'Start Time',
+            headerStyle: 'width: 15%',
+            bodyStyle: 'width: 15%; height: 20px',
+            bodyClass: '',
+            sortable: true,
+            content: function (row, options, td) {
+                if (row.notecount > 0)
+                    td.addClass('note');
+
+                return "<a href='" + xdaInstance + "/Workbench/Event.cshtml?EventID=" + row.theeventid + "' style='color: blue' target='_blank'>" + row.theinceptiontime + "</a>";
+            }
+        });
+
+        columns.push({ field: 'thelinename', headerText: 'Line', headerStyle: 'width: 40%', bodyStyle: 'width: 40%; height: 20px', sortable: true });
+
+        if (includeCauseCode)
+            columns.push({ field: 'causecode', headerText: 'Cause', headerStyle: 'width: 10%', bodyStyle: 'width: 10%; height: 20px', sortable: true });
+
+        columns.push({ field: 'voltage', headerText: 'kV', headerStyle: 'width: 6%', bodyStyle: 'width:  6%; height: 20px', sortable: true });
+        columns.push({ field: 'thefaulttype', headerText: 'Type', headerStyle: 'width:  6%', bodyStyle: 'width:  6%; height: 20px', sortable: true });
+        columns.push({ field: 'thecurrentdistance', headerText: 'Miles', headerStyle: 'width:  6%', bodyStyle: 'width:  6%; height: 20px', sortable: true });
+        columns.push({ field: 'locationname', headerText: 'Location', headerStyle: 'width: 10%', bodyStyle: 'width: 10%; height: 20px', sortable: true });
+        columns.push({ field: 'OpenSEE', headerText: '', headerStyle: 'width: 4%', bodyStyle: 'width: 4%; padding: 0; height: 20px', content: makeOpenSEEButton_html });
+        columns.push({ field: 'FaultSpecifics', headerText: '', headerStyle: 'width: 4%', bodyStyle: 'width: 4%; padding: 0; height: 20px', content: makeFaultSpecificsButton_html });
+        columns.push({ headerText: '', headerStyle: 'width: 4%', bodyStyle: 'width: 4%; padding: 0; height: 20px;text-align: center', content: function (row) { return '<button onclick="openNoteModal(' + row.theeventid + ')"><span class="glyphicon glyphicon-pencil" title="Add Notes."></span></button>'; } });
+
+        fixNumbers(data, ['voltage', 'thecurrentdistance']);
+
+        $('#Detail' + currentTab + "Table").puidatatable({
+            scrollable: true,
+            scrollHeight: '100%',
+            columns: columns,
+            datasource: filteredData
+        });
+    }
+}
+
+function openResultsModal(row){
+
+}
+
+function openNoteModal(eventId) {
+    $('#previousNotes').remove();
+    dataHub.getNotesForEvent(eventId).done(function (data) {
+        $('#faultId').text(eventId);
+        if (data.length > 0)
+            $('#previousNotesDiv').append('<table id="previousNotes" class="table" ><tr><th style="width: 70%">Note</th><th style="width: 20%">Time</th><th style="width: 10%"></th></tr></table>')
+        $.each(data, function (i, d) {
+            $('#previousNotes').append('<tr id="row' + d.ID + '"><td id="note'+d.ID+'">' + d.Note + '</td><td>' + moment(d.TimeStamp).format("MM/DD/YYYY HH:mm:ss") + '</td><td><button onclick="editNote(' + d.ID +')"><span class="glyphicon glyphicon-pencil" title="Edit this note.  Ensure you save after pushing this button or you will lose your note."></span></button><button onclick="removeNote(' + d.ID + ')"><span class="glyphicon glyphicon-remove" title="Remove this note"></span></button></td></tr>');
+        });
+
+        $('#note').val('');
+        $('#notesModal').modal('show');
+    });
+}
+
+function saveNote() {
+    dataHub.saveNoteForEvent($('#faultId').text(), $('#note').val(), userId);
+}
+
+function removeNote(id) {
+    dataHub.removeEventNote(id);
+    $('#row' +id).remove()
+}
+
+function editNote(id) {
+    $('#note').val($('#note' + id).text());
+    dataHub.removeEventNote(id);
+}
+
+function populateCorrectnessDivWithGrid(data) {
     if ($('#Detail' + currentTab + 'Table').children().length > 0) {
         var parent = $('#Detail' + currentTab + 'Table').parent();
         $('#Detail' + currentTab + 'Table').remove();
@@ -339,10 +521,10 @@ function populateCorrectnessDivWithGrid(data, disabledFields) {
     }
 
     var filteredData = [];
-    if (disabledFields !== null) {
+    if (data != null) {
         $.each(data, function (i, d) {
             var flag = false;
-            $.each(disabledFields, function (j, e) {
+            $.each($.grep(Object.keys(disabledList[currentTab]), function (d) { return disabledList[currentTab][d] }), function (j, e) {
                 switch (e) {
                     case '> 100%':
                         if (parseFloat(d.Correctness) > 100)
@@ -383,39 +565,38 @@ function populateCorrectnessDivWithGrid(data, disabledFields) {
             if (!flag)
                 filteredData.push(d);
         });
-    } else {
-        filteredData = data;
+
+
+        fixNumbers(data, ['Latched', 'Unreasonable', 'Noncongruent', 'Correctness']);
+
+        $('#Detail' + currentTab + "Table").puidatatable({
+            scrollable: true,
+            scrollHeight: '100%',
+            columns: [
+                { field: 'thesite', headerText: 'Name', headerStyle: 'width: 35%', bodyStyle: 'width: 35%; height: 20px', sortable: true },
+                { field: 'Latched', headerText: 'Latched', headerStyle: 'width: 12%', bodyStyle: 'width: 12%; height: 20px', sortable: true, content: function (row) { return row.Latched.toFixed(0) + '%'; } },
+                { field: 'Unreasonable', headerText: 'Unreasonable', headerStyle: 'width: 10%', bodyStyle: 'width: 10%; height: 20px', sortable: true, content: function (row) { return row.Unreasonable.toFixed(0) + '%'; } },
+                { field: 'Noncongruent', headerText: 'Noncongruent', headerStyle: 'width: 10%', bodyStyle: 'width: 10%; height: 20px', sortable: true, content: function (row) { return row.Noncongruent.toFixed(0) + '%'; } },
+                { field: 'Correctness', headerText: 'Correctness', headerStyle: 'width: 10%', bodyStyle: 'width:  10%; height: 20px', sortable: true, content: function (row) { return row.Correctness.toFixed(0) + '%'; } },
+                { field: 'ChannelDataQuality', headerText: '', headerStyle: 'width: 4%', bodyStyle: 'width: 4%; padding: 0; height: 20px', content: makeChannelDataQualityButton_html }
+            ],
+            datasource: filteredData
+        });
     }
-
-    fixNumbers(data, ['Latched', 'Unreasonable', 'Noncongruent', 'Correctness']);
-
-    $('#Detail' + currentTab + "Table").puidatatable({
-        scrollable: true,
-        scrollHeight: '100%',
-        columns: [
-            { field: 'thesite', headerText: 'Name', headerStyle: 'width: 35%', bodyStyle: 'width: 35%; height: 20px', sortable: true },
-            { field: 'Latched', headerText: 'Latched', headerStyle: 'width: 12%', bodyStyle: 'width: 12%; height: 20px', sortable: true, content: function (row) { return row.Latched.toFixed(0) + '%'; } },
-            { field: 'Unreasonable', headerText: 'Unreasonable', headerStyle: 'width: 10%', bodyStyle: 'width: 10%; height: 20px', sortable: true, content: function (row) { return row.Unreasonable.toFixed(0) + '%'; } },
-            { field: 'Noncongruent', headerText: 'Noncongruent', headerStyle: 'width: 10%', bodyStyle: 'width: 10%; height: 20px', sortable: true, content: function (row) { return row.Noncongruent.toFixed(0) + '%'; } },
-            { field: 'Correctness', headerText: 'Correctness', headerStyle: 'width: 10%', bodyStyle: 'width:  10%; height: 20px', sortable: true, content: function (row) { return row.Correctness.toFixed(0) + '%'; } },
-            { field: 'ChannelDataQuality', headerText: '', headerStyle: 'width: 4%', bodyStyle: 'width: 4%; padding: 0; height: 20px', content: makeChannelDataQualityButton_html }
-        ],
-        datasource: filteredData
-    });
 }
 
-function populateCompletenessDivWithGrid(data, disabledFields) {
+function populateCompletenessDivWithGrid(data) {
     if ($('#Detail' + currentTab + 'Table').children().length > 0) {
         var parent = $('#Detail' + currentTab + 'Table').parent();
         $('#Detail' + currentTab + 'Table').remove();
         $(parent).append('<div id="Detail' + currentTab + 'Table"></div>');
     }
 
-    var filteredData = [];
-    if (disabledFields !== null) {
+    if (data != null) {
+        var filteredData = [];
         $.each(data, function (i, d) {
             var flag = false;
-            $.each(disabledFields, function (j, e) {
+            $.each($.grep(Object.keys(disabledList[currentTab]), function (d) { return disabledList[currentTab][d] }), function (j, e) {
                 switch (e) {
                     case '> 100%':
                         if (d.Completeness > 100)
@@ -456,116 +637,74 @@ function populateCompletenessDivWithGrid(data, disabledFields) {
             if (!flag)
                 filteredData.push(d);
         });
-    } else {
-        filteredData = data;
+
+
+        fixNumbers(data, ['Expected', 'Received', 'Duplicate', 'Completeness']);
+
+        $('#Detail' + currentTab + "Table").puidatatable({
+            scrollable: true,
+            scrollHeight: '100%',
+            columns: [
+                { field: 'thesite', headerText: 'Name', headerStyle: 'width: 35%', bodyStyle: 'width: 35%; height: 20px', sortable: true },
+                { field: 'Expected', headerText: 'Expected', headerStyle: 'width: 12%', bodyStyle: 'width: 12%; height: 20px', sortable: true },
+                { field: 'Received', headerText: 'Received', headerStyle: 'width: 10%', bodyStyle: 'width: 10%; height: 20px', sortable: true, content: function (row) { return row.Received.toFixed(0) + '%'; } },
+                { field: 'Duplicate', headerText: 'Duplicate', headerStyle: 'width: 10%', bodyStyle: 'width: 10%; height: 20px', sortable: true, content: function (row) { return row.Duplicate.toFixed(0) + '%'; } },
+                { field: 'Completeness', headerText: 'Complete', headerStyle: 'width: 10%', bodyStyle: 'width:  10%; height: 20px', sortable: true, content: function (row) { return row.Completeness.toFixed(0) + '%'; } },
+                { field: 'ChannelCompleteness', headerText: '', headerStyle: 'width: 4%', bodyStyle: 'width: 4%; padding: 0; height: 20px', content: makeChannelCompletenessButton_html }
+            ],
+            datasource: filteredData
+        });
     }
-
-    fixNumbers(data, ['Expected', 'Received', 'Duplicate', 'Completeness']);
-
-    $('#Detail' + currentTab + "Table").puidatatable({
-        scrollable: true,
-        scrollHeight: '100%',
-        columns: [
-            { field: 'thesite', headerText: 'Name', headerStyle: 'width: 35%', bodyStyle: 'width: 35%; height: 20px', sortable: true },
-            { field: 'Expected', headerText: 'Expected', headerStyle: 'width: 12%', bodyStyle: 'width: 12%; height: 20px', sortable: true },
-            { field: 'Received', headerText: 'Received', headerStyle: 'width: 10%', bodyStyle: 'width: 10%; height: 20px', sortable: true, content: function (row) { return row.Received.toFixed(0) + '%'; } },
-            { field: 'Duplicate', headerText: 'Duplicate', headerStyle: 'width: 10%', bodyStyle: 'width: 10%; height: 20px', sortable: true, content: function (row) { return row.Duplicate.toFixed(0) + '%'; } },
-            { field: 'Completeness', headerText: 'Complete', headerStyle: 'width: 10%', bodyStyle: 'width:  10%; height: 20px', sortable: true, content: function (row) { return row.Completeness.toFixed(0) + '%'; } },
-            { field: 'ChannelCompleteness', headerText: '', headerStyle: 'width: 4%', bodyStyle: 'width: 4%; padding: 0; height: 20px', content: makeChannelCompletenessButton_html }
-        ],
-        datasource: filteredData
-    });
 }
 
-function populateEventsDivWithGrid(data, disabledFields) {
+function populateEventsDivWithGrid(data) {
     if ($('#Detail' + currentTab + 'Table').children().length > 0) {
         var parent = $('#Detail' + currentTab + 'Table').parent();
         $('#Detail' + currentTab + 'Table').remove();
         $(parent).append('<div id="Detail'+ currentTab +'Table"></div>');
     }
 
-    fixNumbers(data, ['interruptions', 'faults', 'sags', 'swells', 'others']);
-
-    $('#Detail' + currentTab + "Table").puidatatable({
-        scrollable: true,
-        scrollHeight: '100%',
-        columns: [
-            { field: 'thesite', headerText: 'Name', headerStyle: 'width: 35%', bodyStyle: 'width: 35%; height: 20px', sortable: true, content: function (row) { return '<button class="btn btn-link" onClick="OpenWindowToMeterEventsByLine(' + row.theeventid + ');" text="" style="cursor: pointer; text-align: center; margin: auto; border: 0 none;" title="Launch Events List Page">' + row.thesite+ '</button>' } },
-            { field: 'interruptions', headerText: 'Interruptions', headerStyle: 'width: 12%; ' + (disabledFields !== null && disabledFields.indexOf('Interruption') >= 0 ? 'display: none' : '' ), bodyStyle: 'width: 12%; height: 20px; ' + (disabledFields !== null && disabledFields.indexOf('Interruption') >= 0 ? 'display: none': ''), sortable: true },
-            { field: 'faults', headerText: 'Faults', headerStyle: 'width: 10%; ' + (disabledFields !== null && disabledFields.indexOf('Fault') >= 0 ? 'display: none' : ''), bodyStyle: 'width: 10%; height: 20px; ' + (disabledFields !== null && disabledFields.indexOf('Fault') >= 0 ? 'display: none' : ''), sortable: true },
-            { field: 'sags', headerText: 'Sags', headerStyle: 'width: 10%; ' + (disabledFields !== null && disabledFields.indexOf('Sag') >= 0 ? 'display: none' : ''), bodyStyle: 'width: 10%; height: 20px; ' + (disabledFields !== null && disabledFields.indexOf('Sag') >= 0 ? 'display: none' : ''), sortable: true },
-            { field: 'swells', headerText: 'Swells', headerStyle: 'width: 10%; ' + (disabledFields !== null && disabledFields.indexOf('Swell') >= 0 ? 'display: none' : ''), bodyStyle: 'width:  10%; height: 20px; ' + (disabledFields !== null && disabledFields.indexOf('Swell') >= 0 ? 'display: none' : ''), sortable: true },
-            { field: 'others', headerText: 'Others', headerStyle: 'width:  10%; ' + (disabledFields !== null && disabledFields.indexOf('Other') >= 0 ? 'display: none' : ''), bodyStyle: 'width:  10%; height: 20px; ' + (disabledFields !== null && disabledFields.indexOf('Other') >= 0 ? 'display: none' : ''), sortable: true }
-        ],
-        datasource: data
-    });
-
-}
-
-function populateDisturbancesDivWithGrid(data, disabledFields) {
-    if ($('#Detail' + currentTab + 'Table').children().length > 0) {
-        var parent = $('#Detail' + currentTab + 'Table').parent();
-        $('#Detail' + currentTab + 'Table').remove();
-        $(parent).append('<div id="Detail' + currentTab + 'Table"></div>');
-    }
-
-    fixNumbers(data, ['5', '4', '3', '2', '1', '0']);
-
-    $('#Detail' + currentTab + "Table").puidatatable({
-        scrollable: true,
-        scrollHeight: '100%',
-        columns: [
-            { field: 'thesite', headerText: 'Name', headerStyle: 'width: 35%', bodyStyle: 'width: 35%; height: 20px', sortable: true, content: function (row) { return '<button class="btn btn-link" onClick="OpenWindowToMeterDisturbancesByLine(' + row.theeventid + ');" text="" style="cursor: pointer; text-align: center; margin: auto; border: 0 none;" title="Launch Events List Page">' + row.thesite+ '</button>' } },
-            { field: '5', headerText: '5', headerStyle: 'width: 12%; ' + (disabledFields !== null && disabledFields.indexOf('5') >= 0 ? 'display: none' : ''), bodyStyle: 'width: 12%; height: 20px; ' + (disabledFields !== null && disabledFields.indexOf('5') >= 0 ? 'display: none' : ''), sortable: true },
-            { field: '4', headerText: '4', headerStyle: 'width: 10%; ' + (disabledFields !== null && disabledFields.indexOf('4') >= 0 ? 'display: none' : ''), bodyStyle: 'width: 10%; height: 20px; ' + (disabledFields !== null && disabledFields.indexOf('4') >= 0 ? 'display: none' : ''), sortable: true },
-            { field: '3', headerText: '3', headerStyle: 'width: 10%; ' + (disabledFields !== null && disabledFields.indexOf('3') >= 0 ? 'display: none' : ''), bodyStyle: 'width: 10%; height: 20px; ' + (disabledFields !== null && disabledFields.indexOf('3') >= 0 ? 'display: none' : ''), sortable: true },
-            { field: '2', headerText: '2', headerStyle: 'width: 10%; ' + (disabledFields !== null && disabledFields.indexOf('2') >= 0 ? 'display: none' : ''), bodyStyle: 'width: 10%; height: 20px; ' + (disabledFields !== null && disabledFields.indexOf('2') >= 0 ? 'display: none' : ''), sortable: true },
-            { field: '1', headerText: '1', headerStyle: 'width: 10%; ' + (disabledFields !== null && disabledFields.indexOf('1') >= 0 ? 'display: none' : ''), bodyStyle: 'width: 10%; height: 20px; ' + (disabledFields !== null && disabledFields.indexOf('1') >= 0 ? 'display: none' : ''), sortable: true },
-            { field: '0', headerText: '0', headerStyle: 'width: 10%; ' + (disabledFields !== null && disabledFields.indexOf('0') >= 0 ? 'display: none' : ''), bodyStyle: 'width: 10%; height: 20px; ' + (disabledFields !== null && disabledFields.indexOf('0') >= 0 ? 'display: none' : ''), sortable: true },
-        ],
-        datasource: data
-    });
-}
-
-function populateBreakersDivWithGrid(data, disabledFields) {
-    if ($('#Detail' + currentTab + 'Table').children().length > 0) {
-        var parent = $('#Detail' + currentTab + 'Table').parent();
-        $('#Detail' + currentTab + 'Table').remove();
-        $(parent).append('<div id="Detail' + currentTab + 'Table"></div>');
-    }
-
-
     var filteredData = [];
-    if (disabledFields !== null) {
+    if (data != null ) {
+
         $.each(data, function (i, d) {
-            if (disabledFields.indexOf(d.operationtype) < 0)
+            var sum = 0;
+            $.each(Object.keys(d), function (index, key) {
+                if (key != "EventID" && key != "Site" & !disabledList[currentTab][key]) {
+                    sum += parseInt(d[key]);
+                }
+            });
+            if (sum > 0)
                 filteredData.push(d);
         });
-    } else {
-        filteredData = data;
+
+        var tableObject = {
+            scrollable: true,
+            scrollHeight: '100%',
+            columns: [
+                { field: 'EventID', headerText: 'Name', headerStyle: 'width: 35%', bodyStyle: 'width: 35%; height: 20px', sortable: true, content: function (row) { return '<button class="btn btn-link" onClick="OpenWindowToMeterEventsByLine(' + row.EventID + ');" text="" style="cursor: pointer; text-align: center; margin: auto; border: 0 none;" title="Launch Events List Page">' + row.Site + '</button>' } },
+            ],
+            datasource: filteredData
+        };
+        if (data.length > 0) {
+            $.each(Object.keys(data[0]), function (i, d) {
+                if (d != "MeterID" && d != "EventID" && d != "Site" && !disabledList[currentTab][d]) {
+                    tableObject.columns.push({
+                        field: d,
+                        headerText: d,
+                        headerStyle: 'width: 12%; ',
+                        bodyStyle: 'width: 12%; height: 20px; ',
+                        sortable: true
+                    });
+                }
+            });
+        }
+
+        $('#Detail' + currentTab + "Table").puidatatable(tableObject);
     }
-
-    fixNumbers(data, ['timing', 'speed']);
-
-    $('#Detail' + currentTab + "Table").puidatatable({
-        scrollable: true,
-        scrollHeight: '100%',
-        columns: [
-            { field: 'energized', headerText: 'TCE Time', headerStyle: 'width: 15%', bodyStyle: 'width: 15%; height: 20px', sortable: true },
-            { field: 'breakernumber', headerText: 'Breaker', headerStyle: 'width: 10%', bodyStyle: 'width: 10%; height: 20px', sortable: true },
-            { field: 'linename', headerText: 'Line', headerStyle: 'width: 10%', bodyStyle: 'width:  10%; height: 20px', sortable: true },
-            { field: 'phasename', headerText: 'Phase', headerStyle: 'width:  10%', bodyStyle: 'width:  10%; height: 20px', sortable: true },
-            { field: 'timing', headerText: 'Timing', headerStyle: 'width:  10%', bodyStyle: 'width:  10%; height: 20px', sortable: true },
-            { field: 'speed', headerText: 'Speed', headerStyle: 'width: 10%', bodyStyle: 'width: 10%; height: 20px', sortable: true },
-            { field: 'operationtype', headerText: 'Operation', headerStyle: 'width: 10%', bodyStyle: 'width: 10%; height: 20px', sortable: true },
-            { field: 'OpenSEE', headerText: '', headerStyle: 'width: 4%', bodyStyle: 'width: 4%; padding: 0; height: 20px', content: makeOpenSEEButton_html },
-        ],
-        datasource: filteredData
-    });
-
 }
 
-function populateTrendingDivWithGrid(data, disabledFields) {
+function populateExtensionsDivWithGrid(data) {
     if ($('#Detail' + currentTab + 'Table').children().length > 0) {
         var parent = $('#Detail' + currentTab + 'Table').parent();
         $('#Detail' + currentTab + 'Table').remove();
@@ -573,296 +712,463 @@ function populateTrendingDivWithGrid(data, disabledFields) {
     }
 
     var filteredData = [];
-    if (disabledFields !== null) {
+    if (data != null) {
+
         $.each(data, function (i, d) {
-            if (disabledFields.indexOf(d.eventtype) < 0)
+            var sum = 0;
+            $.each(Object.keys(d), function (index, key) {
+                if (key != "EventID" && key != "Site" & !disabledList[currentTab][key]) {
+                    sum += parseInt(d[key]);
+                }
+            });
+            if (sum > 0)
                 filteredData.push(d);
         });
-    } else {
-        filteredData = data;
+
+        var tableObject = {
+            scrollable: true,
+            scrollHeight: '100%',
+            columns: [
+                { field: 'EventID', headerText: 'Name', headerStyle: 'width: 35%', bodyStyle: 'width: 35%; height: 20px', sortable: true, content: function (row) { return '<button class="btn btn-link" onClick="OpenWindowToMeterExtensionsByLine(' + row.EventID + ');" text="" style="cursor: pointer; text-align: center; margin: auto; border: 0 none;" title="Launch Events List Page">' + row.Site + '</button>' } },
+            ],
+            datasource: filteredData
+        };
+        if (data.length > 0) {
+            $.each(Object.keys(data[0]), function (i, d) {
+                if (d != "MeterID" && d != "EventID" && d != "Site" && !disabledList[currentTab][d]) {
+                    tableObject.columns.push({
+                        field: d,
+                        headerText: d,
+                        headerStyle: 'width: 12%; ',
+                        bodyStyle: 'width: 12%; height: 20px; ',
+                        sortable: true
+                    });
+                }
+            });
+        }
+
+        $('#Detail' + currentTab + "Table").puidatatable(tableObject);
     }
-
-    fixNumbers(data, ['HarmonicGroup', 'eventcount']);
-
-    $('#Detail' + currentTab + "Table").puidatatable({
-        scrollable: true,
-        scrollHeight: '100%',
-        columns: [
-            { field: 'sitename', headerText: 'Name', headerStyle: 'width: 25%', bodyStyle: 'width: 35%; height: 20px', sortable: true},
-            { field: 'eventtype', headerText: 'Alarm Type', headerStyle: 'width: 12%', bodyStyle: 'width: 12%; height: 20px', sortable: true },
-            { field: 'measurementtype', headerText: 'Measurement Type', headerStyle: 'width: 10%', bodyStyle: 'width: 10%; height: 20px', sortable: true },
-            { field: 'characteristic', headerText: 'Characteristic', headerStyle: 'width: 10%', bodyStyle: 'width: 10%; height: 20px', sortable: true },
-            { field: 'phasename', headerText: 'Phase', headerStyle: 'width: 10%', bodyStyle: 'width:  10%; height: 20px', sortable: true },
-            { field: 'HarmonicGroup', headerText: 'HG', headerStyle: 'width: 10%', bodyStyle: 'width:  10%; height: 20px', sortable: true },
-            { field: 'eventcount', headerText: 'Count', headerStyle: 'width:  10%', bodyStyle: 'width:  10%; height: 20px', sortable: true },
-            { field: 'OpenSTE', headerText: '', headerStyle: 'width: 4%', bodyStyle: 'width: 4%; padding: 0; height: 20px', content: function (row) { return makeOpenSTEButton_html(row); } }
-        ],
-        datasource: filteredData
-    });
-
 }
 
-function populateTrendingDataDivWithGrid(data, disabledFields) {
+function populateDisturbancesDivWithGrid(data) {
     if ($('#Detail' + currentTab + 'Table').children().length > 0) {
         var parent = $('#Detail' + currentTab + 'Table').parent();
         $('#Detail' + currentTab + 'Table').remove();
         $(parent).append('<div id="Detail' + currentTab + 'Table"></div>');
     }
 
-    fixNumbers(data, ['Minimum', 'Maximum', 'Average']);
+    var filteredData = [];
+    if (data != null) {
+        $.each(data, function (i, d) {
+            var sum = 0;
+            $.each(Object.keys(d), function (index, key) {
+                if (key != "MeterID" && key != "EventID" && key != "Site" & !disabledList[currentTab][key]) {
+                    sum += parseInt(d[key]);
+                }
+            });
+            if (sum > 0)
+                filteredData.push(d);
+        });
+        
+        var tableObject = {
+            scrollable: true,
+            scrollHeight: '100%',
+            columns: [
+                { field: 'EventID', headerText: 'Name', headerStyle: 'width: 35%', bodyStyle: 'width: 35%; height: 20px', sortable: true, content: function (row) { return '<button class="btn btn-link" onClick="OpenWindowToMeterDisturbancesByLine(' + row.EventID + ');" text="" style="cursor: pointer; text-align: center; margin: auto; border: 0 none;" title="Launch Events List Page">' + row.Site + '</button>' } },
+            ],
+            datasource: filteredData
+        }
 
-    $('#Detail' + currentTab + "Table").puidatatable({
-        scrollable: true,
-        scrollHeight: '100%',
-        columns: [
-            { field: 'Name', headerText: 'Name', headerStyle: 'width: 15%', bodyStyle: 'width: 35%; height: 20px', sortable: true },
-            { field: 'characteristic', headerText: 'Characterisitc', headerStyle: 'width: 12%', bodyStyle: 'width: 12%; height: 20px', sortable: true },
-            { field: 'phasename', headerText: 'Phase', headerStyle: 'width: 10%', bodyStyle: 'width: 10%; height: 20px', sortable: true },
-            { field: 'Minimum', headerText: 'Minimum', headerStyle: 'width: 10%', bodyStyle: 'width: 10%; height: 20px', sortable: true, content: function (row) { return parseFloat(row.Minimum).toFixed(4);} },
-            { field: 'Maximum', headerText: 'Maximum', headerStyle: 'width: 10%', bodyStyle: 'width:  10%; height: 20px', sortable: true, content: function (row) { return parseFloat(row.Maximum).toFixed(4); } },
-            { field: 'Average', headerText: 'Average', headerStyle: 'width: 10%', bodyStyle: 'width:  10%; height: 20px', sortable: true, content: function (row) { return parseFloat(row.Average).toFixed(4); } },
-            { field: 'OpenSTE', headerText: '', headerStyle: 'width: 4%', bodyStyle: 'width: 4%; padding: 0; height: 20px', content: function (row) { return makeOpenSTEButton_html(row); }}
-        ],
-        datasource: data
-    });
+        if (data.length > 0) {
+            $.each(Object.keys(data[0]), function (i, d) {
+                if (d != "MeterID" && d != "EventID" && d != "Site" && !disabledList[currentTab][d]) {
+                    tableObject.columns.push({
+                        field: d,
+                        headerText: d,
+                        headerStyle: 'width: 12%; ',
+                        bodyStyle: 'width: 12%; height: 20px; ',
+                        sortable: true
+                    });
+                }
+            });
+        }
+
+
+        $('#Detail' + currentTab + "Table").puidatatable(tableObject);
+    }
+}
+
+function populateBreakersDivWithGrid(data) {
+    if ($('#Detail' + currentTab + 'Table').children().length > 0) {
+        var parent = $('#Detail' + currentTab + 'Table').parent();
+        $('#Detail' + currentTab + 'Table').remove();
+        $(parent).append('<div id="Detail' + currentTab + 'Table"></div>');
+    }
+
+    if (data != null) {
+        var filteredData = [];
+        $.each(data, function (i, d) {
+            if ($.grep(Object.keys(disabledList[currentTab]), function (d) { return disabledList[currentTab][d] }).indexOf(d.operationtype) < 0)
+                filteredData.push(d);
+        });
+
+
+        fixNumbers(data, ['timing', 'statustiming', 'speed']);
+
+        $('#Detail' + currentTab + "Table").puidatatable({
+            scrollable: true,
+            scrollHeight: '100%',
+            columns: [
+                {
+                    field: 'energized', headerText: 'TCE Time', headerStyle: 'width: 140px', bodyStyle: 'width: 140px; height: 20px', sortable: true, content:
+                                  function (row) {
+                                      var title = "";
+                                      var bgColor = "initial";
+
+                                      if (row.chatter != 0) {
+                                          title = "title='Status bit chatter detected'";
+                                          bgColor = "yellow";
+                                      }
+
+                                      if (row.dcoffset != 0) {
+                                          title = "title='DC offset logic applied'";
+                                          bgColor = "aqua";
+                                      }
+
+                                      return "<a href='" + xdaInstance + "/Workbench/Breaker.cshtml?EventID=" + row.theeventid + "' " + title + " style='background-color: " + bgColor + ";color: blue' target='_blank'>" + row.energized + "</a>";
+                                  }
+                },
+                { field: 'breakernumber', headerText: 'Breaker', headerStyle: 'width: 80px', bodyStyle: 'width: 80px; height: 20px', sortable: true },
+                { field: 'linename', headerText: 'Line', headerStyle: 'width: auto', bodyStyle: 'width: auto; height: 20px', sortable: true },
+                { field: 'phasename', headerText: 'Phase', headerStyle: 'width: 75px', bodyStyle: 'width: 75px; height: 20px', sortable: true },
+                { field: 'timing', headerText: 'Timing', headerStyle: 'width: 80px', bodyStyle: 'width: 80px; height: 20px', sortable: true },
+                { field: 'statustiming', headerText: 'Status Timing', headerStyle: 'width: 80px', bodyStyle: 'width: 80px; height: 20px', sortable: true },
+                { field: 'speed', headerText: 'Speed', headerStyle: 'width: 75px', bodyStyle: 'width: 75px; height: 20px', sortable: true },
+                { field: 'operationtype', headerText: 'Operation', headerStyle: 'width: 100px', bodyStyle: 'width: 100px; height: 20px', sortable: true },
+                { field: 'OpenSEE', headerText: '', headerStyle: 'width: 50px', bodyStyle: 'width: 50px; padding: 0; height: 20px', content: makeOpenSEEButton_html },
+            ],
+            datasource: filteredData
+        });
+    }
+}
+
+function populateTrendingDivWithGrid(data) {
+    if ($('#Detail' + currentTab + 'Table').children().length > 0) {
+        var parent = $('#Detail' + currentTab + 'Table').parent();
+        $('#Detail' + currentTab + 'Table').remove();
+        $(parent).append('<div id="Detail' + currentTab + 'Table"></div>');
+    }
+
+    if (data != null) {
+        var filteredData = [];
+        $.each(data, function (i, d) {
+            if ($.grep(Object.keys(disabledList[currentTab]), function (d) { return disabledList[currentTab][d] }).indexOf(d.eventtype) < 0)
+                filteredData.push(d);
+        });
+
+
+        fixNumbers(data, ['HarmonicGroup', 'eventcount']);
+
+        $('#Detail' + currentTab + "Table").puidatatable({
+            scrollable: true,
+            scrollHeight: '100%',
+            columns: [
+                { field: 'sitename', headerText: 'Name', headerStyle: 'width: 25%', bodyStyle: 'width: 35%; height: 20px', sortable: true },
+                { field: 'eventtype', headerText: 'Alarm Type', headerStyle: 'width: 12%', bodyStyle: 'width: 12%; height: 20px', sortable: true },
+                { field: 'measurementtype', headerText: 'Measurement Type', headerStyle: 'width: 10%', bodyStyle: 'width: 10%; height: 20px', sortable: true },
+                { field: 'characteristic', headerText: 'Characteristic', headerStyle: 'width: 10%', bodyStyle: 'width: 10%; height: 20px', sortable: true },
+                { field: 'phasename', headerText: 'Phase', headerStyle: 'width: 10%', bodyStyle: 'width:  10%; height: 20px', sortable: true },
+                { field: 'HarmonicGroup', headerText: 'HG', headerStyle: 'width: 10%', bodyStyle: 'width:  10%; height: 20px', sortable: true },
+                { field: 'eventcount', headerText: 'Count', headerStyle: 'width:  10%', bodyStyle: 'width:  10%; height: 20px', sortable: true },
+                { field: 'OpenSTE', headerText: '', headerStyle: 'width: 4%', bodyStyle: 'width: 4%; padding: 0; height: 20px', content: function (row) { return makeOpenSTEButton_html(row); } }
+            ],
+            datasource: filteredData
+        });
+    }
+}
+
+function populateTrendingDataDivWithGrid(data) {
+    if ($('#Detail' + currentTab + 'Table').children().length > 0) {
+        var parent = $('#Detail' + currentTab + 'Table').parent();
+        $('#Detail' + currentTab + 'Table').remove();
+        $(parent).append('<div id="Detail' + currentTab + 'Table"></div>');
+    }
+
+    if(data != null){
+        fixNumbers(data, ['Minimum', 'Maximum', 'Average']);
+
+        $('#Detail' + currentTab + "Table").puidatatable({
+            scrollable: true,
+            scrollHeight: '100%',
+            columns: [
+                { field: 'Name', headerText: 'Name', headerStyle: 'width: 15%', bodyStyle: 'width: 35%; height: 20px', sortable: true },
+                { field: 'characteristic', headerText: 'Characterisitc', headerStyle: 'width: 12%', bodyStyle: 'width: 12%; height: 20px', sortable: true },
+                { field: 'phasename', headerText: 'Phase', headerStyle: 'width: 10%', bodyStyle: 'width: 10%; height: 20px', sortable: true },
+                { field: 'Minimum', headerText: 'Minimum', headerStyle: 'width: 10%', bodyStyle: 'width: 10%; height: 20px', sortable: true, content: function (row) { return parseFloat(row.Minimum).toFixed(4);} },
+                { field: 'Maximum', headerText: 'Maximum', headerStyle: 'width: 10%', bodyStyle: 'width:  10%; height: 20px', sortable: true, content: function (row) { return parseFloat(row.Maximum).toFixed(4); } },
+                { field: 'Average', headerText: 'Average', headerStyle: 'width: 10%', bodyStyle: 'width:  10%; height: 20px', sortable: true, content: function (row) { return parseFloat(row.Average).toFixed(4); } },
+                { field: 'OpenSTE', headerText: '', headerStyle: 'width: 4%', bodyStyle: 'width: 4%; padding: 0; height: 20px', content: function (row) { return makeOpenSTEButton_html(row); }}
+            ],
+            datasource: data
+        });
+    }
 }
 
 function fixNumbers(data, numFields) {
-    $.each(data, function (_, obj) {
-        $.each(numFields, function (_, field) {
-            obj[field] = Number(obj[field]);
+    if (data != null) {
+        $.each(data, function (_, obj) {
+            $.each(numFields, function (_, field) {
+                obj[field] = Number(obj[field]);
+            });
         });
-    });
-}
-
-
-//////////////////////////////////////////////////////////////////////////////////////////////////////////
-// The following function are for making button links to another page and opening another page
-function filterMakeFaultSpecificsButton_html(id) {
-    var return_html = "";
-    if (id.eventtype == "Fault") {
-        return_html = makeFaultSpecificsButton_html(id);
-    }
-    return (return_html);
-}
-
-function makeFaultSpecificsButton_html(id) {
-    var return_html = "";
-    return_html += '<div style="width: 100%; Height: 100%; text-align: center; margin: auto; border: 0 none;">';
-    return_html += '<button onClick="OpenWindowToFaultSpecifics(' + id.theeventid + ');" value="" style="cursor: pointer; text-align: center; margin: auto; border: 0 none;" title="Open Fault Detail Window">';
-    return_html += '<img src="images/faultDetailButton.png" /></button></div>';
-return (return_html);
-}
-
-function OpenWindowToFaultSpecifics(id) {
-    var datarow = id;
-    var popup = window.open(homePath + "FaultSpecifics.aspx?eventid=" + id, id + "FaultLocation", "left=0,top=0,width=300,height=200,status=no,resizable=yes,scrollbars=yes,toolbar=no,menubar=no,location=no");
-    return false;
-}
-
-function makeOpenSEEButton_html(id) {
-    var return_html = "";
-    return_html += '<div style="cursor: pointer; width: 100%; Height: 100%; text-align: center; margin: auto; border: 0 none;">';
-    return_html += '<button onClick="OpenWindowToOpenSEE(' + id.theeventid + ');" value="" style="cursor: pointer; text-align: center; margin: auto; border: 0 none;" title="Launch OpenSEE Waveform Viewer">';
-    return_html += '<img src="images/seeButton.png" /></button></div>';
-    return (return_html);
-}
-
-function makeOpenSTEButton_html(id) {
-    var return_html = "";
-    var url = "'openSTE.aspx?channelid="
-        + encodeURIComponent(id.channelid)
-        + "&date=" + encodeURIComponent(id.date)
-        + "&meterid=" + encodeURIComponent(id.meterid)
-        + "&measurementtype=" + encodeURIComponent(id.measurementtype)
-        + "&characteristic=" + encodeURIComponent(id.characteristic)
-        + "&phasename=" + encodeURIComponent(id.phasename) + "'";
-    return_html += '<div style="cursor: pointer; width: 100%; Height: 100%; text-align: center; margin: auto; border: 0 none;">';
-    return_html += '<button onClick="OpenWindowToOpenSTE( ' + url + ',' + id.channelid + ' )" value="" style="cursor: pointer; text-align: center; margin: auto; border: 0 none;" title="Launch OpenSTE Trending Viewer">';
-    return_html += '<img src="images/steButton.png" /></button></div>';
-    return (return_html);
-}
-
-function OpenWindowToOpenSTE(url, id) {
-    var popup = window.open(homePath + url, id + "openSTE", "left=0,top=0,width=1024,height=768,status=no,resizable=yes,scrollbars=no,toolbar=no,menubar=no,location=no");
-    return false;
-}
-
-
-function OpenWindowToOpenSEE(id) {
-    var url = "openSEE.aspx?eventid=" + id;
-
-    if (currentTab === "Breakers")
-        url += "&breakerdigitals=1";
-    else
-        url += "&faultcurves=1";
-
-    var popup = window.open(homePath + url, id + "openSEE", "left=0,top=0,width=1024,height=768,status=no,resizable=yes,scrollbars=no,toolbar=no,menubar=no,location=no");
-    return false;
-}
-
-function makeChannelDataQualityButton_html(id) {
-    var return_html = "";
-    return_html += '<div style="cursor: pointer; width: 100%; Height: 100%; text-align: center; margin: auto; border: 0 none;">';
-    return_html += '<button onClick="OpenWindowToChannelDataQuality(' + id.theeventid + ');" value="" style="cursor: pointer; text-align: center; margin: auto; border: 0 none;" title="Launch Channel Data Quality Details Page">';
-    return_html += '<img src="images/dqDetailButton.png" /></button></div>';
-    return (return_html);
-}
-
-function makeChannelCompletenessButton_html(id) {
-    var return_html = "";
-    return_html += '<div style="cursor: pointer; width: 100%; Height: 100%; text-align: center; margin: auto; border: 0 none;">';
-    return_html += '<button onClick="OpenWindowToChannelDataCompleteness(' + id.theeventid + ');" value="" style="cursor: pointer; text-align: center; margin: auto; border: 0 none;" title="Launch Channel Data Quality Details Page">';
-    return_html += '<img src="images/dcDetailButton.png" /></button></div>';
-    return (return_html);
-}
-
-function makeMeterEventsByLineButton_html(id) {
-    var return_html = "";
-    return_html += '<div style="cursor: pointer; width: 100%; Height: 100%; text-align: center; margin: auto; border: 0 none;">';
-    return_html += '<button onClick="OpenWindowToMeterEventsByLine(' + id.theeventid + ');" value="" style="cursor: pointer; text-align: center; margin: auto; border: 0 none;" title="Launch Events List Page">';
-    return_html += '<img src="images/eventDetailButton.png" /></button></div>';
-    return (return_html);
-}
-
-function OpenWindowToMeterEventsByLine(id) {
-    var popup = window.open(homePath + "MeterEventsByLine.aspx?eventid=" + id, id + "MeterEventsByLine", "left=0,top=0,width=1024,height=768,status=no,resizable=yes,scrollbars=no,toolbar=no,menubar=no,location=no");
-    return false;
-}
-
-function OpenWindowToMeterDisturbancesByLine(id) {
-    var popup = window.open(homePath + "MeterDisturbancesByLine.aspx?eventid=" + id, id + "MeterDisturbancesByLine", "left=0,top=0,width=1024,height=768,status=no,resizable=yes,scrollbars=no,toolbar=no,menubar=no,location=no");
-    return false;
-}
-
-
-function OpenWindowToChannelDataQuality(id) {
-    var popup = window.open(homePath + "ChannelDataQuality.aspx?eventid=" + id, id + "ChannelDataQuality", "left=0,top=0,width=1024,height=768,status=no,resizable=yes,scrollbars=no,toolbar=no,menubar=no,location=no");
-    return false;
-}
-
-function OpenWindowToChannelDataCompleteness(id) {
-    var popup = window.open(homePath + "ChannelDataCompleteness.aspx?eventid=" + id, id + "ChannelDataCompleteness", "left=0,top=0,width=1024,height=768,status=no,resizable=yes,scrollbars=no,toolbar=no,menubar=no,location=no");
-    return false;
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////////
-function getColorsForTab(thetab) {   
-    switch(thetab) {
-    
-        case "Events":
-            return(globalcolorsEvents);
-            break;
-
-        case "Disturbances":
-            return (globalcolorsEvents);
-            break;
-
-
-        case "Trending":
-            return(globalcolorsTrending);
-            break;
-
-        case "Faults":
-            return(globalcolorsFaults);
-            break;
-
-        case "Breakers":
-            return(globalcolorsBreakers);
-            break;
-
-        case "Completeness":
-            return (globalcolorsDQ);
-            break;
-
-        case "Correctness":
-            return (globalcolorsDQ);
-            break;
-
-        default :
-            return (globalcolors);
     }
 }
-
-//////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////
 
 function getFormattedDate(date) {
-    var newdate = new Date(date);
-    var year = newdate.getFullYear();
-    var month = (1 + newdate.getMonth()).toString();
-    month = month.length > 1 ? month : '0' + month;
-    var day = newdate.getDate().toString();
-    day = day.length > 1 ? day : '0' + day;
-    return month + '/' + day + '/' + year;
+    if(globalContext == "day")
+        return moment(date).utc().format('YYYY-MM-DDTHH:00') + 'Z';
+    else if (globalContext == "hour")
+        return moment(date).utc().format('YYYY-MM-DDTHH:mm') + 'Z';
+    else if (globalContext == "minute")
+        return moment(date).utc().format('YYYY-MM-DDTHH:mm:ss') + 'Z';
+    else if (globalContext == "second")
+        return moment(date).utc().format('YYYY-MM-DDTHH:mm:ss') + 'Z';
+    else
+        return moment(date).utc().format('YYYY-MM-DDT00:00:00') + 'Z';
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////
+function stepOut() {
+    setGlobalContext(false);
+    loadDataForDate();
+}
 
-function populateDivWithBarChart(thedatasource, thediv, siteName, siteID, thedatefrom, thedateto) {
-    var thestartdateX = new Date(thedatefrom);
-    thestartdateX.setHours(0, 0, 0, 0);
+function populateDivWithBarChart(thediv, siteID, thedatefrom, thedateto) {
+    var tabsForDigIn = ['Events', 'Disturbances', 'Faults', 'Breakers', 'Extensions'];
+    var context = (tabsForDigIn.indexOf(currentTab) < 0 ? "Custom": globalContext);
 
-    var contextfromdateX = new Date(contextfromdate);
-    contextfromdateX.setHours(0, 0, 0, 0);
+    
+    window.dataHub['getDataForPeriod'](siteID, thedatefrom, thedateto, postedUserName, currentTab, context).done(function (data) {
+        if (data !== null) {
 
-    var contexttodateX = new Date(contexttodate);
-    contexttodateX.setHours(0, 0, 0, 0);
+            var graphData = { graphData: [], keys: [], colors: [] };
 
-    var thestartdate = new Date(Date.UTC(thestartdateX.getUTCFullYear(), thestartdateX.getUTCMonth(), thestartdateX.getUTCDate(), 0, 0, 0)).getTime();
-    var contextfromdateUTC = new Date(Date.UTC(contextfromdateX.getUTCFullYear(), contextfromdateX.getUTCMonth(), contextfromdateX.getUTCDate(), 0, 0, 0)).getTime();
-    var contexttodateUTC = new Date(Date.UTC(contexttodateX.getUTCFullYear(), contexttodateX.getUTCMonth(), contexttodateX.getUTCDate(), 0, 0, 0)).getTime();
+            var dates = $.map(data.Types[0].Data, function (d) { return d.Item1 });
+
+            $.each(dates, function (i, date) {
+                var obj = {};
+                var total = 0;
+                obj["Date"] = Date.parse(date);
+                $.each(data.Types, function (j, type) {
+                    obj[type.Name] = type.Data[i].Item2;
+                    total += type.Data[i].Item2;
+                });
+                obj["Total"] = total;
+                graphData.graphData.push(obj);
+
+            });
+
+            data.Types.forEach(function (d) {
+                graphData.keys.push(d.Name);
+                graphData.colors.push(d.Color);
+            });
 
 
-    var thedatasent = "";
-    thedatasent = "{'siteID':'" + siteID + "', 'targetDateFrom':'" + thedatefrom + "', 'targetDateTo':'" + thedateto + "' , 'userName':'" + postedUserName + "'}";
-    $.ajax({
-        type: "POST",
-        url: homePath +'/eventService.asmx/' + thedatasource,
-        data: thedatasent,
-        contentType: "application/json; charset=utf-8",
-        dataType: 'json',
-        cache: true,
-        success: function (data) {
-            if (data.d.data !== null) {
-                data.d.data.reverse();
-                var graphData = [];
-                for (var i = 0; i < data.d.data[0].data.length; ++i) {
-                    var obj = {};
-                    var total = 0;
-                    obj["Date"] = new Date(thedatefrom).setDate(new Date(thedatefrom).getDate() + i);
-                    data.d.data.forEach(function (d, j) {
-                        obj[d.name] = d.data[i];
-                        total += d.data[i];
-                        obj[d.name + 'Disabled'] = false;
-                    });
-                    obj["Total"] = total;
-                    graphData.push(obj);
+            cache_Graph_Data = graphData;
 
-                }
+            if (thediv === "Overview") {
 
-                cache_Graph_Data = graphData;
+            } else if (thediv === "TrendingData") {
 
-                if (thediv === "Overview") {
-
-                } else if (thediv === "TrendingData") {
-
-                } else
-                    buildBarChart(graphData, thediv, siteName, siteID, thedatefrom, thedateto);
-            }
-            
-        },
-        failure: function (msg) {
-            alert(msg);
-        },
-        async: true
+            } else
+                buildBarChart(graphData, thediv, siteID, data.StartDate, data.EndDate, context);
+        }
     });
+
+    if (currentTab == "Disturbances") {
+        dataHub.getVoltageMagnitudeData(siteID, thedatefrom, thedateto, context).done(function (data) {
+            cache_MagDur_Data = data;
+            buildMagDurChart(data, thediv + "MagDur")
+        })
+    }
+    
+}
+
+function buildBarChartPlotly(data, thediv, siteID, thedatefrom, thedateto) {
+    var tabsForDigIn = ['Events', 'Disturbances', 'Faults', 'Breakers', 'Extensions'];
+
+    if (brush === null) {
+        brush = d3.svg.brush()
+    }
+
+    buildChart(data, thediv, thedatefrom, thedateto);
+    buildOverChart(data, thediv, thedatefrom, thedateto);
+
+
+    function buildChart(data, thediv, thedatefrom, thedateto) {
+        var fields = [];
+        var startDate = new Date(thedatefrom);
+        var endDate = new Date(thedateto);
+        var context = (tabsForDigIn.indexOf(currentTab) < 0 ? "Days" : globalContext);
+
+        $.each(data.keys, function (i, key) {
+            fields.push({
+                x: data.graphData.map(function (a) {
+                    var now = new Date(a.Date);
+                    var utc = new Date(now.getTime() + now.getTimezoneOffset() * 60000);
+                    return utc
+                }),
+                y: data.graphData.map(function (a) { return a[key] }),
+                name: key,
+                marker: {
+                    color: data.colors[i],
+                },
+                type: 'bar'
+            });
+        });
+
+        var tickFormat;
+        var xAxisLabel;
+        if (context == 'day') {
+            tickFormat = Plotly.d3.time.format.utc("%H");
+            xAxisLabel = 'Hours';
+        }
+        else if (context == 'hour') {
+            tickFormat = Plotly.d3.time.format.utc("%M");
+            xAxisLabel = 'Minutes';
+        }
+        else if (context == 'minute' || context == 'second') {
+            tickFormat = Plotly.d3.time.format.utc("%S");
+            xAxisLabel = 'Seconds';
+        }
+        else {
+            tickFormat = Plotly.d3.time.format.utc("%b-%d");
+            xAxisLabel = 'Days';
+        }
+        var layout = {
+            xaxis: {
+                title: xAxisLabel,
+                type: 'date',
+                tickFormat: tickFormat,
+                range: [new Date(startDate.getTime() + startDate.getTimezoneOffset() * 60000).getTime(), new Date(endDate.getTime() + endDate.getTimezoneOffset() * 60000).getTime()]
+            },
+            yaxis: {
+                title: currentTab + ' Counts',
+                range: [0]
+            },
+            barmode: 'stack'
+        };
+        $('#' + thediv).children().remove();
+        Plotly.newPlot(thediv, fields.reverse(), layout);
+
+        $('#' + thediv).off('plotly_click');
+        $('#' + thediv).on('plotly_click', function (event, data) {
+            var thedate = getFormattedDate(data.Date);
+            contextfromdate = thedate;
+            contexttodate = thedate;
+            var filter = [];
+            //$.each(legend.selectAll("rect"), function (i, element) {
+            //    if ($(this).css('fill') !== 'rgb(128, 128, 128)')
+            //        filter.push(element[0].__data__);
+            //});
+
+            manageTabsByDateForClicks(currentTab, thedate, thedate, null);
+            cache_Last_Date = thedate;
+        });
+    }
+    function buildOverChart(data, thediv, thedatefrom, thedateto) {
+        var context = (tabsForDigIn.indexOf(currentTab) < 0 ? "Days" : globalContext);
+        var startDate = new Date(thedatefrom);
+        var endDate = new Date(thedateto);
+        var chartData = [{
+            x: data.graphData.map(function (a) {
+                var now = new Date(a.Date);
+                var utc = new Date(now.getTime() + now.getTimezoneOffset() * 60000);
+                return utc
+            }),
+            y: data.graphData.map(function (a) {
+                var total = 0;
+                $.each(Object.keys(a), function (index, key) {
+                    if(key != 'Date')
+                        total += parseInt(a[key]);
+                });
+                return total;
+            }),
+            type: 'bar',
+            hoverinfo: 'none',
+            marker: {
+                color: 'black'
+            }
+        }];
+
+        var layout = {
+            autosize: false,
+            width: $('#' + thediv + 'Overview').width(),
+            height: $('#' + thediv + 'Overview').height() - 15,
+            margin: {
+                l: 50,
+                r: 50,
+                b: 15,
+                t: 0,
+                pad: 0
+            },
+            xaxis: {
+                type: 'date',
+                showline: true,
+                tickFormat: Plotly.d3.time.format.utc("%b-%d"),
+                range: [new Date(startDate.getTime() + startDate.getTimezoneOffset() * 60000).getTime(), new Date(endDate.getTime() + endDate.getTimezoneOffset() * 60000).getTime()],
+                fixedrange: true
+
+            },
+            yaxis: {
+                autorange: true,
+                showgrid: false,
+                zeroline: false,
+                showline: false,
+                autotick: true,
+                ticks: '',
+                showticklabels: false,
+                fixedrange: true
+            }
+        };
+        $('#' + thediv + 'Overview').children().remove();
+        Plotly.newPlot(thediv + 'Overview', chartData, layout, { displayModeBar: false });
+
+        //$('#' + thediv + 'Overview').off('plotly_selected');
+        //$('#' + thediv + 'Overview').on('plotly_selected', function (event, clickData) {
+        //    if (clickData == undefined)
+        //        buildChart(data, thediv, thedatefrom, thedateto)
+        //    else {
+        //        var newGraphData = {
+        //            colors: data.colors,
+        //            graphData: $.grep(data.graphData, function (a) { if (a.Date >= Date.parse(clickData.range.x[0]) && a.Date < Date.parse(clickData.range.x[1])) return a; }),
+        //            keys: data.keys
+        //        }
+        //        buildChart(newGraphData, thediv, clickData.range.x[0], clickData.range.x[1])
+        //    }
+        //});
+        brush.on("brush", brushed);
+
+        var svg = d3.select("#" + thediv + 'Overview').select('svg');
+        svg.append("g").attr("class", "x brush").call(brush).selectAll("rect").attr("y", -6).attr("height", $("#" + thediv + 'Overview').height() + 7);  // +7 is magic number for styling
+
+        function brushed() {
+
+        }
+    }
 
 }
 
-function buildBarChart(data, thediv, siteName, siteID, thedatefrom, thedateto) {
-    $('#' + thediv).children().remove();
+function buildBarChart(data, thediv, siteID, thedatefrom, thedateto) {
+    var tabsForDigIn = ['Events', 'Disturbances', 'Faults', 'Breakers', 'Extensions'];
+    var context = (tabsForDigIn.indexOf(currentTab) < 0 ? "Custom" : globalContext);
 
+    $('#' + thediv).children().remove();
+    $('#' + thediv + 'Overview').children().remove();
     var YaxisLabel = "";
+    var XaxisLabel = "";
     switch (currentTab) {
         case "Completeness":
             YaxisLabel = "Sites";
@@ -878,34 +1184,66 @@ function buildBarChart(data, thediv, siteName, siteID, thedatefrom, thedateto) {
     }
 
     // D3
-    var chartData = deepCopy(data);
+    var chartData = deepCopy(data.graphData);
+    var date1 = moment(thedatefrom);
+    var date2 = moment(thedateto);
+    var numSamples;
+    var x;
+    var xOverview;
+    var xAxisOverview;
 
     //container sizing variables
-    var margin = { top: 20, right: 125, bottom: 100, left: 60 },
+    var margin = { top: 20, right: 125, bottom: 20, left: 60 },
         width = $('#' + thediv).width() - margin.left - margin.right,
         height = $('#' + thediv).height() - margin.top - margin.bottom,
-        marginOverview = { top: height + 50, right: margin.right, bottom: 20, left: margin.left }
-    heightOverview = $('#' + thediv).height() - marginOverview.top - marginOverview.bottom;
+        marginOverview = { top: 10, right: margin.right, bottom: 20, left: margin.left },
+        heightOverview = $('#' + thediv + 'Overview').height() - marginOverview.top - marginOverview.bottom;
 
     // axis definition and construction
-    var x = d3.time.scale().domain([new Date(thedatefrom), new Date(thedateto).setDate(new Date(thedateto).getDate() + 1)]).range([0, width]);
     var y = d3.scale.linear().range([height, 0]);
     var binsScale = d3.scale.ordinal().domain(d3.range(30)).rangeBands([0, width], 0.1, 0.05);
-    var xOverview = d3.time.scale().domain([new Date(thedatefrom), new Date(thedateto).setDate(new Date(thedateto).getDate() + 1)]).range([0, width]);
     var yOverview = d3.scale.linear().range([heightOverview, 0]);
-    var color = d3.scale.ordinal().range(getColorsForTab(currentTab));
-
-    var xAxis = d3.svg.axis().scale(x).orient("bottom");
+    var color = d3.scale.ordinal().range(data.colors.reverse()).domain(data.keys.reverse());
     var yAxis = d3.svg.axis().scale(y).orient("left").tickFormat(d3.format(".2d"));
-    var xAxisOverview = d3.svg.axis().scale(xOverview).orient("bottom");
+
+    if (context == 'day') {
+        numSamples = 24;
+        x = d3.time.scale.utc().domain([date1,date2]).range([0, width]);
+        xOverview = d3.time.scale.utc().domain([date1, date2]).range([0, width]);
+        xAxisOverview = d3.svg.axis().scale(xOverview).orient("bottom").ticks((numSamples < 12 ? numSamples : 12)).tickFormat(d3.time.format.utc('%H'));
+        XaxisLabel = 'Hours';
+    }
+    else if (context == 'hour') {
+        numSamples = 60;
+        x = d3.time.scale.utc().domain([date1, date2]).range([0, width]);
+        xOverview = d3.time.scale.utc().domain([date1, date2]).range([0, width]);
+        xAxisOverview = d3.svg.axis().scale(xOverview).orient("bottom").ticks((numSamples < 12 ? numSamples : 12)).tickFormat(d3.time.format.utc('%M'));
+        XaxisLabel = 'Minutes';
+    }
+    else if (context == 'minute' || context == 'second') {
+        numSamples = 60;
+        x = d3.time.scale.utc().domain([date1, date2]).range([0, width]);
+        xOverview = d3.time.scale.utc().domain([date1, date2]).range([0, width]);
+        xAxisOverview = d3.svg.axis().scale(xOverview).orient("bottom").ticks((numSamples < 12 ? numSamples : 12)).tickFormat(d3.time.format.utc('%S'));
+        XaxisLabel = 'Seconds';
+    }
+    else {
+        numSamples = Math.ceil(moment.duration(date2.utc().endOf('day').diff(date1.utc())).asDays());
+        x = xOverview = d3.time.scale.utc().domain([date1, date2]).range([0, width]);
+        xAxisOverview = d3.svg.axis().scale(xOverview).orient("bottom").ticks((numSamples < 10 ? numSamples : 10)).tickFormat(d3.time.format.utc('%m/%d'));
+        XaxisLabel = 'Days';
+    }
+
 
     // graph initialization
-    var tooltip = d3.select('#' + thediv).append('div')
-                .attr('class', 'hidden tooltip');
 
     var svg = d3.select("#" + thediv).append("svg")
         .attr("width", width + margin.left + margin.right)
         .attr("height", height + margin.top + margin.bottom);
+
+    var svgOverview = d3.select("#" + thediv + 'Overview').append("svg")
+        .attr("width", width + marginOverview.left + marginOverview.right)
+        .attr("height", heightOverview + marginOverview.top + marginOverview.bottom);
 
     var main = null, overview = null, legend = null;
 
@@ -916,64 +1254,76 @@ function buildBarChart(data, thediv, siteName, siteID, thedatefrom, thedateto) {
      brush.x(xOverview).on("brush", brushed);
     y.domain([0, d3.max(chartData, function (d) { return d.Total; })]);
     yOverview.domain(y.domain());
-    color.domain(d3.keys(chartData[0]).filter(function (key) { return key !== "Date" && key !== "Total" && key.indexOf('Disabled') < 0 }));
 
-    var numSamples = chartData[0].length;
     var seriesClass = function (seriesName) { return "series-" + seriesName.toLowerCase(); };
     var layerClass = function (d) { return "layer " + seriesClass(d.key); };
 
     var stack = d3.stack()
-        .keys(d3.keys(chartData[0]).filter(function (key) { return key !== "Date" && key !== "Total" && key.indexOf('Disabled') < 0 }))
+        .keys(data.keys)
         .order(d3.stackOrderNone)
         .offset(d3.stackOffsetNone);
 
     var series = null;
 
-    var tempKeys = d3.keys(chartData[0]).filter(function (key) { return key !== 'Total' && key !== 'Date' && key.indexOf('Disabled') < 0 });
+    var tempKeys = data.keys;
 
     $.each(chartData, function (i, d) {
         $.each(tempKeys, function (j, k) {
-            if (chartData[i][k + 'Disabled'] === true)
+            if (disabledList[currentTab][k] === true)
                 chartData[i][k] = 0;
-
         });
-
     });
 
 
     if (brush !== null && !brush.empty()) {
         x.domain(brush.extent());
         series = stack(chartData.filter(function (d) {
-            return d.Date > new Date(brush.extent()[0]).setHours(0, 0, 0, 0) && d.Date < new Date(brush.extent()[1]).setHours(0, 0, 0, 0);
+            return moment(d.Date) >= moment(brush.extent()[0]) && moment(d.Date) < moment(brush.extent()[1]);
         }));
     }
     else {
         series = stack(chartData);
     }
     var overviewSeries = stack(chartData);
-    var keys = d3.keys(series).filter(function (a) { return a !== "Values"; }).reverse();
     
-    buildMainGraph(series);
+    buildMainGraph(series, date1, date2);
     buildOverviewGraph(overviewSeries);
-    buildLegend();
 
 
     //// d3 Helper Functions
-    function buildMainGraph(data) {
-        var numSamples;
-        if (brush !== null && !brush.empty()) {
-            var date1 = new Date(brush.extent()[0]).setHours(0,0,0,0);
-            var date2 = new Date(brush.extent()[1]).setHours(0,0,0,0);
-            numSamples = 1 + (date2 - date1) / 1000 / 60 / 60 / 24;
+    function buildMainGraph(data, startDate, endDate) {
+        $('#' + thediv).children().remove();
+        svg = d3.select("#" + thediv).append("svg")
+        .attr("width", width + margin.left + margin.right)
+        .attr("height", height + margin.top + margin.bottom);
+
+        var xAxis;
+        var tabsForDigIn = ['Events', 'Disturbances', 'Faults', 'Breakers', 'Extensions'];
+        var context = (tabsForDigIn.indexOf(currentTab) < 0 ? "Custom" : globalContext);
+
+        if (context == 'day' ) {
+            numSamples = moment.duration(endDate.diff(startDate)).asHours();
+            xAxis = d3.svg.axis().scale(x).orient("bottom").ticks(numSamples).tickFormat(d3.time.format.utc('%H'));
+        }
+        else if (context == 'hour' ) {
+            numSamples = moment.duration(endDate.diff(startDate)).asMinutes();
+            xAxis = d3.svg.axis().scale(x).orient("bottom").ticks((numSamples < 12 ? numSamples : 12)).tickFormat(d3.time.format.utc('%M'));
+        }
+        else if (context == 'minute' || context == 'second') {
+            numSamples = moment.duration(endDate.diff(startDate)).asSeconds();
+            xAxis = d3.svg.axis().scale(x).orient("bottom").ticks((numSamples < 12 ? numSamples : 12)).tickFormat(d3.time.format.utc('%S'));
         }
         else {
-            var date1 = new Date(thedatefrom).setHours(0, 0, 0, 0);
-            var date2 = new Date(thedateto).setHours(0, 0, 0, 0);
-            numSamples = 1 + (date2 - date1) / 1000 / 60 / 60 / 24;
+            numSamples = Math.ceil(moment.duration(endDate.utc().endOf('day').diff(startDate.utc())).asDays());
+            x = d3.time.scale.utc().domain([startDate, endDate]).range([0, width]);
+            xAxis = d3.svg.axis().scale(x).orient("bottom").ticks((numSamples < 10 ? numSamples : 10)).tickFormat(d3.time.format.utc('%m/%d'));
         }
 
-
-        y.domain([0, d3.max(data, function (d) { return d3.max(d, function (e) { return e[1] }); })]);
+        y.domain([0, d3.max(data, function (d) {
+            return d3.max(d, function (e) {
+                return e[1]
+            });
+        })]);
 
         main = svg.append("g")
             .attr("class", "main")
@@ -989,6 +1339,54 @@ function buildBarChart(data, thediv, siteName, siteID, thedatefrom, thedateto) {
                     .attr("y1", y)
                     .attr("y2", y);
 
+        if (context != "custom" && tabsForDigIn.indexOf(currentTab) >= 0) {
+            var btnBar = d3.select("#" + thediv).append("div")
+                .attr("id", "btnBar")
+                .attr("class", "modebar modebar--hover")
+                .style("position", "absolute")
+                .style("display", "table-row")
+                .style("top", "0")
+                .style("left", ($('#Overview' + currentTab).width() / 2 ) + "px");
+
+            btnBar.append("div")
+                .attr("class", "modebar-group")
+                .style("display", "table-cell")
+                .style("padding", "2px")
+                .append("a")
+                .attr("id", "graphMoveBackwardBtn")
+                .attr("class", "modebar-btn")
+                .attr("onclick", "moveGraphBackward()")
+                .attr("title", "Step back by 1 " + context)
+                .style("cursor", "pointer")
+                .append("span")
+                .attr("class", "glyphicon glyphicon-backward");
+
+            btnBar.append("div")
+                .attr("class", "modebar-group")
+                .style("display", "table-cell")
+                .style("padding", "2px")
+                .append("a")
+                .attr("id", "stepOutBtn")
+                .attr("class", "modebar-btn")
+                .attr("onclick", "stepOut()")
+                .style("cursor", "pointer")
+                .text("Step Out ");
+
+            btnBar.append("div")
+                .attr("class", "modebar-group")
+                .style("display", "table-cell")
+                .style("padding", "2px")
+                .append("a")
+                .attr("id", "graphMoveForwardBtn")
+                .attr("class", "modebar-btn")
+                .attr("onclick", "moveGraphForward()")
+                .attr("title", "Step forward by 1 " + context)
+                .style("cursor", "pointer")
+                .append("span")
+                .attr("class", "glyphicon glyphicon-forward")
+
+        }
+
         var layersArea = main.append("g")
             .attr("class", "layers");
 
@@ -1001,13 +1399,13 @@ function buildBarChart(data, thediv, siteName, siteID, thedatefrom, thedateto) {
         })
             .enter().append("rect")
                 .attr("x", function (d) {
-                    return x(d.data.Date);
+                    return x(moment(d.data.Date));
                 })
                 .attr("width", function () {
                     return width / numSamples;
                 })
                 .attr("y", function (d) {
-                    return y(d[1]);
+                    return y((d[1]? d[1]: 0));
                 })
                 .attr("height", function (d) { return y(d[0]) - y(d[1]); })
                 .style("fill", function (d, e, i) {
@@ -1018,7 +1416,12 @@ function buildBarChart(data, thediv, siteName, siteID, thedatefrom, thedateto) {
         main.append("g")
             .attr("class", "x axis")
             .attr("transform", "translate(0," + height + ")")
-            .call(xAxis);
+            .call(xAxis)
+            .append("text")
+            .attr("y", 10)
+            .attr("x", -margin.left)
+            .attr("dy", ".71em")
+            .text(XaxisLabel);
 
         main.append("g")
             .attr("class", "y axis")
@@ -1030,20 +1433,23 @@ function buildBarChart(data, thediv, siteName, siteID, thedatefrom, thedateto) {
             .attr("dy", ".71em")
             .text(YaxisLabel);
 
+        var tooltip = d3.select('#' + thediv).append('div')
+            .attr('class', 'hidden tooltip');
+
         bar.on('mousemove', function (d, f, g) {
             var mouse = d3.mouse(svg.node()).map(function (e) {
                 return parseInt(e);
             });
             var html = "<table><tr><td>Date: </td><td style='text-align: right'>" + getFormattedDate(d.data.Date) + "</td></tr>";
-            var dKeys = d3.keys(d.data).filter(function (key) { return key !== 'Date' && key !== 'Total' && key !== 'Disabled' && key !== 'Values' && key.indexOf('Disabled') < 0 }).reverse();
+            var dKeys = d3.keys(d.data).filter(function (key) { return key !== 'Date' && key !== 'Total' && key !== 'newTotal' && key !== 'Disabled' && key !== 'Values' && key.indexOf('Disabled') < 0 }).reverse();
             dKeys.forEach(function (data, i) {
                 html += "<tr><td>" + data + "</td><td style='text-align: right'>" + (data === "Date" ? getFormattedDate(d.data.Date) : d.data[data]) + "</td></tr>";
             });
             html += "</table>";
 
             tooltip.classed('hidden', false)
-            .attr('style', 'left:' + (mouse[0] + 15) + 'px; top:' + (height / 2) + 'px')
-            .html(html);
+            .html(html)
+            .attr('style', (width - mouse[0] < $('.tooltip').width() ? 'right:' + (width - mouse[0] + margin.left + $('.tooltip').width()) : 'left:' + (mouse[0] + 15)) + 'px; bottom:' + (height - mouse[1]) + 'px');
         });
 
         bar.on('mouseout', function () {
@@ -1051,7 +1457,7 @@ function buildBarChart(data, thediv, siteName, siteID, thedatefrom, thedateto) {
         });
 
         bar.on('click', function (d) {
-            var thedate = getFormattedDate(d.data.Date + (new Date(d.data.Date).getTimezoneOffset() * 60 * 1000));
+            var thedate = getFormattedDate(d.data.Date);
             contextfromdate = thedate;
             contexttodate = thedate;
             var filter = [];
@@ -1059,24 +1465,32 @@ function buildBarChart(data, thediv, siteName, siteID, thedatefrom, thedateto) {
                 if ($(this).css('fill') !== 'rgb(128, 128, 128)')
                     filter.push(element[0].__data__);
             });
+            
             manageTabsByDateForClicks(currentTab, thedate, thedate, filter);
             cache_Last_Date = thedate;
-            getTableDivData('getDetailsForSites' + currentTab, 'Detail' + currentTab, siteName, siteID, thedate);
         });
 
-
+        buildLegend();
     }
 
     function buildOverviewGraph(data) {
 
-        var date1 = new Date(thedatefrom).setHours(0, 0, 0, 0);
-        var date2 = new Date(thedateto).setHours(0, 0, 0, 0);
-        var numSamples = 1 + (date2 - date1) / 1000 / 60 / 60 / 24;
+        $.each(data[0], function (index, element) {
+                var total = 0
+                $.each(Object.keys(element.data), function (i, a) {
+                    if (a != 'Date' && a != 'Total')
+                        total += parseInt(element.data[a])
+                })
+                element.data.newTotal = total;
+            });
 
+        yOverview.domain([0, d3.max(data, function (d) {
+            return d3.max(d, function (e) {
+                return e.data.newTotal
+            });
+        })]);
 
-        yOverview.domain([0, d3.max(data, function (d) { return d3.max(d, function (e) { return e[1] }); })]);
-
-        overview = svg.append("g")
+        overview = svgOverview.append("g")
             .attr("class", "overview")
             .attr("transform", "translate(" + marginOverview.left + "," + marginOverview.top + ")");
 
@@ -1089,10 +1503,12 @@ function buildBarChart(data, thediv, siteName, siteID, thedatefrom, thedateto) {
 
         var bar = layers.selectAll("rect").data(function (d) { return d;  })
             .enter().append("rect")
-                .attr("x", function (d) { return xOverview(d.data.Date); })
+                .attr("x", function (d) { return xOverview(moment(d.data.Date)); })
                 .attr("width", function () { return width / numSamples; })
-                .attr("y", function (d) {  return yOverview(d[1]); })
-                .attr("height", function (d) { return yOverview(d[0]) - yOverview(d[1]); })
+                .attr("y", function (d) {
+                    return yOverview(d.data.newTotal);
+                })
+                .attr("height", function (d) { return heightOverview - yOverview(d.data.newTotal); })
                 .style("fill", "black");
 
 
@@ -1115,38 +1531,39 @@ function buildBarChart(data, thediv, siteName, siteID, thedatefrom, thedateto) {
             .enter().append("g")
             .attr("id", "chartLegend")
             .attr("class", "legend")
-            .attr("transform", function (d, i) { return "translate(140," + i * 20 + ")"; });
+            .attr("transform", function (d, i) { return "translate(140," + (i + 1) * 20 + ")"; });
 
         var disabledLegendFields = [];
+
+        if (!disabledList.hasOwnProperty(currentTab)) disabledList[currentTab] = {};
 
         legend.append("rect")
             .attr("x", width + -65)
             .attr("width", 18)
             .attr("height", 18)
             .style("fill", function (d, i, e) {
-                if (cache_Graph_Data[0][d + 'Disabled']) {
-                    disabledLegendFields.push(d);
+                if (!disabledList[currentTab].hasOwnProperty(d)) disabledList[currentTab][d] = false;
+
+                if (disabledList[currentTab][d]) {
                     return '#808080';
                 }
                 return color(d);
             })
             .style("cursor", "pointer")
             .on("click", function (d, i) {
-                if ($(this).css('fill') !== 'rgb(128, 128, 128)') {
+                disabledList[currentTab][d] = !disabledList[currentTab][d];
+                if (disabledList[currentTab][d]) {
                     $(this).css('fill', 'rgb(128, 128, 128)');
-                    disabledLegendFields.push(d);
                 }
                 else {
                     $(this).css('fill', color(d));
-                    disabledLegendFields = disabledLegendFields.filter(function (word) { return word !== d });
                 }
-
-                toggleSeries(d, chartData, $(this).css('fill') === 'rgb(128, 128, 128)');
-                window["populate" + currentTab + "DivWithGrid"](cache_Table_Data, disabledLegendFields);
-
-                if ($('#mapGrid')[0].value == "Map" && (currentTab === 'Disturbances' || currentTab === 'Events' || currentTab ==='Trending')) {
-                    var legendFields = color.domain().slice().filter(function (a) { return disabledLegendFields.indexOf(a) < 0 });
-                    showHeatmap(document.getElementById('selectHeatmap' + currentTab), legendFields);
+                toggleSeries(d, $(this).css('fill') === 'rgb(128, 128, 128)');
+                window["populate" + currentTab + "DivWithGrid"](cache_Table_Data);
+                resizeMatrixCells(currentTab);
+                showSiteSet($("#selectSiteSet" + currentTab)[0]);
+                if ($("#map" + currentTab + "Grid")[0].value == "Map" && (currentTab === 'Disturbances' || currentTab === 'Events' || currentTab === 'Trending')) {
+                    var legendFields = color.domain().slice().filter(function (a) { return $.map(disabledList[currentTab], function (data, key) { if (data) return key }).indexOf(a) < 0 });
                 }
 
             });
@@ -1157,134 +1574,254 @@ function buildBarChart(data, thediv, siteName, siteID, thedatefrom, thedateto) {
             .attr("width", 40)
             .attr("dy", ".35em")
             .style("text-anchor", "start")
-            .text(function (d) { return d; });
+            .text(function (d) {
+                return d;
+        });
 
     }
 
     //called when selection is chosen on overview map
     function brushed() {
-        if (brush.empty())
-            return;
+        var tabsForDigIn = ['Events', 'Disturbances', 'Faults', 'Breakers', 'Extensions'];
+        var context = (tabsForDigIn.indexOf(currentTab) < 0 ? "Custom" : globalContext);
+
+        var startDate;
+        var endDate;
+
+        if (brush.empty()) {
+            startDate = moment(thedatefrom);
+            endDate = moment(thedateto);
+        }
+        else{
+            startDate = moment(brush.extent()[0]);
+            endDate = moment(brush.extent()[1]);
+        }
+
+        if (context == 'day') {
+            if (startDate.minutes() > 29)
+                startDate.add(1, 'hour').startOf('hour');
+            else
+                startDate.startOf('hour');
+
+            if (endDate.minutes() > 29)
+                endDate.add(1, 'hour').startOf('hour');
+            else
+                endDate.startOf('hour');
+        }
+        else if (context == 'hour') {
+            if (startDate.seconds() > 29)
+                startDate.add(1, 'minute').startOf('minute');
+            else
+                startDate.startOf('minute');
+
+            if (endDate.seconds() > 29)
+                endDate.add(1, 'minute').startOf('minute');
+            else
+                endDate.startOf('minute');
+        }
+        else if (context == 'minute' || context == 'second') {
+            if (startDate.milliseconds() > 500)
+                startDate.add(1, 'second').startOf('second');
+            else
+                startDate.startOf('second');
+
+            if (endDate.milliseconds() > 500)
+                endDate.add(1, 'second').startOf('second');
+            else
+                endDate.startOf('second');
+        }
+        else {
+            if (startDate.hour() > 11)
+                startDate.add(1, 'day').startOf('day');
+            else
+                startDate.startOf('day');
+
+            if (endDate.hour() > 1)
+                endDate.add(1, 'day').startOf('day');
+            else
+                endDate.startOf('day');
+        }
 
 
-        x.domain(brush.empty() ? xOverview.domain() : brush.extent());
+        x.domain([startDate, endDate]);
+
         main.selectAll("g").remove();
 
-        var newData = deepCopy(cache_Graph_Data);
-        var tempKeys = d3.keys(newData[0]).filter(function (key) { return key !== 'Total' && key !== 'Date' && key.indexOf('Disabled') < 0 });
+        var newData = deepCopy(cache_Graph_Data.graphData);
+        var tempKeys = cache_Graph_Data.keys;
 
         $.each(newData, function (i, d) {
             $.each(tempKeys, function (j, k) {
-                if (newData[i][k + 'Disabled'] === true)
+                if (disabledList[currentTab][k] === true)
                     newData[i][k] = 0;
 
             });
 
         });
+        var stackedData;
 
-        var stackedData = stack(newData.filter(function (d) {
-            return d.Date > new Date(brush.extent()[0]).setHours(0, 0, 0, 0) && d.Date < new Date(brush.extent()[1]).setHours(0, 0, 0, 0);
-        }));
+        if (brush.empty())
+            stackedData = stack(newData);
+        else
+            stackedData = stack(newData.filter(function (d) {
+                return moment(d.Date) >= startDate && moment(d.Date) < endDate;
+            }));
 
-
-        buildMainGraph(stackedData);
-
-
+        buildMainGraph(stackedData, startDate, endDate);
     }
 
     //Toggles a certain series.
-    function toggleSeries(seriesName, data, isDisabling) {
+    function toggleSeries(seriesName, isDisabling) {
+        var tabsForDigIn = ['Events', 'Disturbances', 'Faults', 'Breakers', 'Extensions'];
+        var context = (tabsForDigIn.indexOf(currentTab) < 0 ? "Custom" : globalContext);
 
-        var newData = deepCopy(cache_Graph_Data);
+        var newData = deepCopy(cache_Graph_Data.graphData);
 
-        var tempKeys = d3.keys(newData[0]).filter(function (key) { return key !== 'Total' && key !== 'Date' && key.indexOf('Disabled') < 0 });
+        var tempKeys = cache_Graph_Data.keys;
+        disabledList[currentTab][seriesName] = isDisabling;
+
         $.each(newData, function (i, d) {
-
-            cache_Graph_Data[i][seriesName + 'Disabled'] = isDisabling;
-            newData[i][seriesName + 'Disabled'] = isDisabling;
             $.each(tempKeys, function (j, k) {
-                if (newData[i][k + 'Disabled'] === true)
+                if (disabledList[currentTab][k] === true)
                     newData[i][k] = 0;
 
             });
 
         });
 
+        var thedatefrom;
+        var thedateto;
+
+        if (context == "custom") {
+            thedatefrom = moment($('#dateRange').data('daterangepicker').startDate._d.toISOString()).utc();
+            thedateto = moment($('#dateRange').data('daterangepicker').endDate._d.toISOString()).utc();
+        }
+        else if (tabsForDigIn.indexOf(currentTab) >= 0 && context == "day") {
+            thedatefrom = moment(contextfromdate).utc().startOf('day');
+            thedateto = moment(contextfromdate).utc().endOf('day');
+        }
+        else if (tabsForDigIn.indexOf(currentTab) >= 0 && context == "hour") {
+            thedatefrom = moment(contextfromdate).utc().startOf('hour');
+            thedateto = moment(contextfromdate).utc().endOf('hour');
+        }
+        else if (tabsForDigIn.indexOf(currentTab) >= 0 && context == "minute") {
+            thedatefrom = moment(contextfromdate).utc().startOf('minute');
+            thedateto = moment(contextfromdate).utc().endOf('minute');
+        }
+        else if (tabsForDigIn.indexOf(currentTab) >= 0 && context == "second") {
+            thedatefrom = moment(contextfromdate).utc().startOf('second');
+            thedateto = moment(contextfromdate).utc().endOf('second');
+        }
+        else {
+            thedatefrom = moment($('#dateRange').data('daterangepicker').startDate._d.toISOString()).utc();
+            thedateto = moment($('#dateRange').data('daterangepicker').endDate._d.toISOString()).utc();
+        }
+
+        $.jStorage.set('disabledList', disabledList)
         var stackedData = stack((!brush.empty() ? newData.filter(function (d) { return d.Date > new Date(brush.extent()[0]).setHours(0, 0, 0, 0) && d.Date < new Date(brush.extent()[1]).setHours(0, 0, 0, 0); }) : newData));
         var overviewStackedData = stack(newData);
         x.domain(brush.empty() ? xOverview.domain() : brush.extent());
         main.selectAll("g").remove();
-        buildMainGraph(stackedData);
+        buildMainGraph(stackedData, thedatefrom, thedateto);
         overview.selectAll("g").remove();
-        buildOverviewGraph(overviewStackedData);
+        buildOverviewGraph(overviewStackedData, thedatefrom, thedateto);
     }
 
-    // Deep copies an obj
-    function deepCopy(obj) {
-        if (Object.prototype.toString.call(obj) === '[object Array]') {
-            var out = [], i = 0, len = obj.length;
-            for (; i < len; i++) {
-                out[i] = arguments.callee(obj[i]);
-            }
-            return out;
-        }
-        if (typeof obj === 'object') {
-            var out = {}, i;
-            for (i in obj) {
-                out[i] = arguments.callee(obj[i]);
-            }
-            return out;
-        }
-        return obj;
-    }
 
 }
+
+function moveGraphBackward() {
+    if (globalContext == "day") {
+        contextfromdate = moment(contextfromdate).utc().startOf('day').subtract(1,'days').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+        contexttodate = moment(contextfromdate).utc().endOf('day').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+    }
+    else if (globalContext == "hour") {
+        contextfromdate = moment(contextfromdate).utc().startOf('hour').subtract(1, 'hours').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+        contexttodate = moment(contextfromdate).utc().endOf('hour').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+    }
+    else if (globalContext == "minute") {
+        contextfromdate = moment(contextfromdate).utc().startOf('minute').subtract(1, 'minutes').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+        contexttodate = moment(contextfromdate).utc().endOf('minute').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+    }
+    else if (globalContext == "second") {
+        contextfromdate = moment(contextfromdate).utc().startOf('second').subtract(1, 'seconds').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+        contexttodate = moment(contextfromdate).utc().endOf('second').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+    }
+
+
+    cache_Map_Matrix_Data_Date_From = contextfromdate;
+    cache_Map_Matrix_Data_Date_To = contexttodate;
+
+    if (contextfromdate === contexttodate) {
+        cache_Last_Date = contexttodate;
+    }
+    else {
+        cache_Last_Date = null;
+        cache_Table_Data = null;
+        cache_Sparkline_Data = null;
+    }
+
+    setMapHeaderDate(contextfromdate, contexttodate);
+    manageTabsByDate(currentTab, contextfromdate, contexttodate);
+}
+
+function moveGraphForward() {
+    if (globalContext == "day") {
+        contextfromdate = moment(contextfromdate).utc().startOf('day').add(1, 'days').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+        contexttodate = moment(contextfromdate).utc().endOf('day').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+    }
+    else if (globalContext == "hour") {
+        contextfromdate = moment(contextfromdate).utc().startOf('hour').add(1, 'hours').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+        contexttodate = moment(contextfromdate).utc().endOf('hour').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+    }
+    else if (globalContext == "minute") {
+        contextfromdate = moment(contextfromdate).utc().startOf('minute').add(1, 'minutes').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+        contexttodate = moment(contextfromdate).utc().endOf('minute').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+    }
+    else if (globalContext == "second") {
+        contextfromdate = moment(contextfromdate).utc().startOf('second').add(1, 'seconds').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+        contexttodate = moment(contextfromdate).utc().endOf('second').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+    }
+
+
+    cache_Map_Matrix_Data_Date_From = contextfromdate;
+    cache_Map_Matrix_Data_Date_To = contexttodate;
+
+    if (contextfromdate === contexttodate) {
+        cache_Last_Date = contexttodate;
+    }
+    else {
+        cache_Last_Date = null;
+        cache_Table_Data = null;
+        cache_Sparkline_Data = null;
+    }
+
+    setMapHeaderDate(contextfromdate, contexttodate);
+    manageTabsByDate(currentTab, contextfromdate, contexttodate);
+}
+
+// Deep copies an obj
+function deepCopy(o) {
+    var output, v, key;
+    output = Array.isArray(o) ? [] : {};
+    for (key in o) {
+        v = o[key];
+        output[key] = (typeof v === "object") ? deepCopy(v) : v;
+    }
+    return output;
+}
+
 //////////////////////////////////////////////////////////////////////////////////////////////
-function populateDivWithErrorBarChart(thedatasource, thediv, siteName, siteID, thedatefrom, thedateto) {
-    var thestartdateX = new Date(thedatefrom);
-    thestartdateX.setHours(0, 0, 0, 0);
-
-    var contextfromdateX = new Date(contextfromdate);
-    contextfromdateX.setHours(0, 0, 0, 0);
-
-    var contexttodateX = new Date(contexttodate);
-    contexttodateX.setHours(0, 0, 0, 0);
-
-    var thestartdate = new Date(Date.UTC(thestartdateX.getUTCFullYear(), thestartdateX.getUTCMonth(), thestartdateX.getUTCDate(), 0, 0, 0)).getTime();
-    var contextfromdateUTC = new Date(Date.UTC(contextfromdateX.getUTCFullYear(), contextfromdateX.getUTCMonth(), contextfromdateX.getUTCDate(), 0, 0, 0)).getTime();
-    var contexttodateUTC = new Date(Date.UTC(contexttodateX.getUTCFullYear(), contexttodateX.getUTCMonth(), contexttodateX.getUTCDate(), 0, 0, 0)).getTime();
-
-
-    var thedatasent = "";
-    thedatasent = "{'siteID':'" + siteID +
-                "', 'colorScale':'" + $('#contourColorScaleSelect').val() +
-                "', 'targetDateFrom':'" + thedatefrom +
-                "', 'targetDateTo':'" + thedateto +
-                "', 'userName':'" + postedUserName +
-                "'}";
-    $.ajax({
-        type: "POST",
-        url: homePath +'/eventService.asmx/' + thedatasource,
-        data: thedatasent,
-        contentType: "application/json; charset=utf-8",
-        dataType: 'json',
-        cache: true,
-        success: function (data) {
-
-            cache_ErrorBar_Data = data.d;
-
-            buildErrorBarChart(data.d, thediv, siteName, siteID, thedatefrom, thedateto);
-
-        },
-        failure: function (msg) {
-            alert(msg);
-        },
-        async: true
+function populateDivWithErrorBarChart(thedatasource, thediv,  siteID, thedatefrom, thedateto) {
+    dataHub.getTrendingDataForPeriod(siteID, $('#contourColorScaleSelect').val(), thedatefrom, thedateto, postedUserName).done(function (data) {
+        cache_ErrorBar_Data = data;
+        buildErrorBarChart(data, thediv, siteID, thedatefrom, thedateto);
+    }).fail(function (msg) {
+        alert(msg);
     });
-
 }
 
-function buildErrorBarChart(data, thediv, siteName, siteID, thedatefrom, thedateto) {
+function buildErrorBarChart(data, thediv, siteID, thedatefrom, thedateto) {
     function drawCap(ctx, x, y, radius) {
         ctx.beginPath();
         ctx.lineTo(x + radius, y);
@@ -1317,17 +1854,18 @@ function buildErrorBarChart(data, thediv, siteName, siteID, thedatefrom, thedate
 
     $.each(data, function (_, point) {
         var mid = (point.Maximum + point.Minimum) / 2;
-        graphData[0].data.push([new Date(point.Date + ' UTC').getTime(), point.Maximum]);
-        graphData[1].data.push([new Date(point.Date + ' UTC').getTime(), point.Average]);
-        graphData[2].data.push([new Date(point.Date + ' UTC').getTime(), point.Minimum]);
-        graphData[3].data.push([new Date(point.Date + ' UTC').getTime(), mid, mid - point.Minimum, point.Maximum - mid]);
+        graphData[0].data.push([new Date(point.Date).getTime(), point.Maximum]);
+        graphData[1].data.push([new Date(point.Date).getTime(), point.Average]);
+        graphData[2].data.push([new Date(point.Date).getTime(), point.Minimum]);
+        graphData[3].data.push([new Date(point.Date).getTime(), mid, mid - point.Minimum, point.Maximum - mid]);
     });
 
 
     //Set mins and maxes
-    var xMin = new Date(thedatefrom + ' UTC').getTime();
-    var xMax = new Date(thedateto + ' UTC').getTime();
+    var xMin = new Date(thedatefrom).getTime();
+    var xMax = new Date(thedateto).getTime();
 
+    $('#' + thediv).empty();
     //initiate plot
     var plot = $.plot($('#' + thediv), graphData, {
         legend: {
@@ -1393,10 +1931,9 @@ function buildErrorBarChart(data, thediv, siteName, siteID, thedatefrom, thedate
         if (item) {            
             $('.contourControl').show();
             cache_Contour_Data = null;
-            var thedate = $.plot.formatDate($.plot.dateGenerator(item.datapoint[0], { timezone: "utc" }), "%m/%d/%Y");
+            var thedate = getFormattedDate($.plot.formatDate($.plot.dateGenerator(item.datapoint[0], { timezone: "utc" }), "%m/%d/%Y"));
             manageTabsByDateForClicks(currentTab,thedate, thedate, null);
             cache_Last_Date = thedate;
-            getTableDivData('getDetailsForSites' + currentTab, 'Detail' + currentTab, siteName, siteID, thedate);
 
         }
     });
@@ -1464,368 +2001,114 @@ function buildErrorBarChart(data, thediv, siteName, siteID, thedatefrom, thedate
 
 
 }
-//////////////////////////////////////////////////////////////////////////////////////////////
 
-function getEventsHeatmapSwell(currentTab, datefrom, dateto) {
-    var thedatasent = "{'targetDateFrom':'" + datefrom + "' , 'targetDateTo':'" + dateto + "' , 'userName':'" + postedUserName + "'}";
-    var url = homePath + "/mapService.asmx/getLocationsHeatmapSwell";
-
-    heatmap_Cache_Date_From = null;
-    heatmap_Cache_Date_To = null;
-    heatmapCache = null;
-
-    $.ajax({
-        datefrom: datefrom,
-        dateto: dateto,
-        type: "POST",
-        url: url,
-        data: thedatasent,
-        contentType: "application/json; charset=utf-8",
-        dataType: 'json',
-        cache: true,
-        success: function (data) {
-
-            heatmap_Cache_Date_From = datefrom;
-            heatmap_Cache_Date_To = dateto;
-            heatmapCache = data.d;
-            //var map = getMapInstance(currentTab);
-            LoadHeatmapLeaflet(data.d);
-
-        },
-        failure: function (msg) {
-            alert(msg);
-        },
-        async: true
+function buildMagDurChart(data, thediv) {
+    var companyTrace = [{
+        x: [],
+        y: [],
+        name: 'Disturbances',
+        text: [],
+        type: 'scatter',
+        mode: 'markers'
+    }];
+    $.each(data, function (i, d) {
+        companyTrace[0].x.push(d.DurationSeconds);
+        companyTrace[0].y.push(d.PerUnitMagnitude * 100);
+        companyTrace[0].text.push(d.EventID)
     });
+
+    var layout = {
+        title: 'Disturbance Magnitude Duration Scatter Plot',
+        hovermode: 'closest',
+        xaxis: { title: 'Duration (Seconds)', type: 'log', autorange: true, autotick: false, tickvals: [0, 0.001, 0.01, 0.1, 1, 10, 100, 1000, 10000]/*, range: [-3, 4] */ },
+        yaxis: { side: 'left', overlaying: 'y', anchor: 'x', title: 'Voltage Magnitude(% of Nominal)'/*, range: [0, 150]*/ },
+    };
+
+    dataHub.getCurves().done(function (curves) {
+
+        var curveIds = [];
+        $.each(curves, function (index, points) {
+            if (curveIds.indexOf(points.ID) < 0)
+                curveIds.push(points.ID);
+        });
+        var lines = []
+        $.each(curveIds, function (index, id) {
+            companyTrace.push({
+                x: $.map(curves, function (curve) { if (curve.ID == id) return parseFloat(curve.DurationSeconds) }),
+                y: $.map(curves, function (curve) { if (curve.ID == id) return parseFloat(curve.PerUnitMagnitude) * 100 }),
+                name: $.map(curves, function (curve) { if (curve.ID == id) return curve.Name })[0], type: 'scatter', mode: 'lines',
+                visible: ($.map(curves, function (curve) { if (curve.ID == id) return curve.Visible })[0] ? true : 'legendonly')
+            });
+        });
+
+        var plot = Plotly.newPlot(thediv, companyTrace, layout);
+
+        $('#'+ thediv).off('plotly_click');
+        $('#'+ thediv).on('plotly_click', function (event, data) {
+            window.open(homePath + "Main/OpenSEE?eventid=" + data.points[0].fullData.text[data.points[0].pointNumber] + "&faultcurves=1");
+        });
+    });
+
+    $(window).off('resize');
+    $(window).on('resize', function () {
+        Plotly.purge(thediv);
+        buildMagDurChart(cache_MagDur_Data, thediv)
+    });
+
+
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////
 
-function getEventsHeatmapSags(currentTab, datefrom, dateto) {
-    var thedatasent = "{'targetDateFrom':'" + datefrom + "' , 'targetDateTo':'" + dateto + "' , 'userName':'" + postedUserName + "'}";
-    var url = homePath + "/mapService.asmx/getLocationsHeatmapSags";
-
-    heatmap_Cache_Date_From = null;
-    heatmap_Cache_Date_To = null;
-    heatmapCache = null;
-
-    $.ajax({
-        datefrom: datefrom,
-        dateto: dateto,
-        type: "POST",
-        url: url,
-        data: thedatasent,
-        contentType: "application/json; charset=utf-8",
-        dataType: 'json',
-        cache: true,
-        success: function (data) {
-
-            heatmap_Cache_Date_From = datefrom;
-            heatmap_Cache_Date_To = dateto;
-            heatmapCache = data.d;
-            //var map = getMapInstance(currentTab);
-            LoadHeatmapLeaflet(data.d);
-
-        },
-        failure: function (msg) {
-            alert(msg);
-        },
-        async: true
-    });
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////////
-
-function getEventsHeatmapCounts(currentTab, datefrom, dateto, severities) {
-    var thedatasent = "{'targetDateFrom':'" + datefrom + "' , 'targetDateTo':'" + dateto + "' , 'userName':'" + postedUserName + "', 'severityFilter':'" + severities + "'}";
-    var url = homePath + "/mapService.asmx/getLocations" + currentTab + "HeatmapCounts";
-
-    heatmap_Cache_Date_From = null;
-    heatmap_Cache_Date_To = null;
-    heatmapCache = null;
-
-    $.ajax({
-        datefrom: datefrom,
-        dateto: dateto,
-        type: "POST",
-        url: url,
-        data: thedatasent,
-        contentType: "application/json; charset=utf-8",
-        dataType: 'json',
-        cache: true,
-        success: function (data) {
-            var map = getMapInstance(currentTab);
-            LoadHeatmapLeaflet(data.d);
-
-        },
-        failure: function (msg) {
-            alert(msg);
-        },
-        async: true
-    });
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////////
-
-function getDisturbancesHeatmapCounts(currentTab, datefrom, dateto, severities) {
-    var thedatasent = "{'targetDateFrom':'" + datefrom + "' , 'targetDateTo':'" + dateto + "' , 'userName':'" + postedUserName + "', 'severityFilter':'" + severities+"'}";
-    var url = homePath + "/mapService.asmx/getLocations" + currentTab + "HeatmapCounts";
-    //console.log(thedatasent);
-    heatmap_Cache_Date_From = null;
-    heatmap_Cache_Date_To = null;
-    heatmapCache = null;
-    //console.log(url);
-    $.ajax({
-        datefrom: datefrom,
-        dateto: dateto,
-        type: "POST",
-        url: url,
-        data: thedatasent,
-        contentType: "application/json; charset=utf-8",
-        dataType: 'json',
-        cache: true,
-        success: function (data) {
-            LoadHeatmapLeaflet(data.d);
-        },
-        failure: function (msg) {
-            alert(msg);
-        },
-        async: true
-    });
-}
-/////////////////////////////////////////////////////////////////////////////////////////////////
-function getTrendingHeatmapCounts(currentTab, datefrom, dateto, severities) {
-    var thedatasent = "{'targetDateFrom':'" + datefrom + "' , 'targetDateTo':'" + dateto + "' , 'userName':'" + postedUserName + "', 'severityFilter':'" + severities + "'}";
-    var url = homePath + "/mapService.asmx/getLocations" + currentTab + "HeatmapCounts";
-    heatmap_Cache_Date_From = null;
-    heatmap_Cache_Date_To = null;
-    heatmapCache = null;
-    $.ajax({
-        datefrom: datefrom,
-        dateto: dateto,
-        type: "POST",
-        url: url,
-        data: thedatasent,
-        contentType: "application/json; charset=utf-8",
-        dataType: 'json',
-        cache: true,
-        success: function (data) {
-            LoadHeatmapLeaflet(data.d);
-        },
-        failure: function (msg) {
-            alert(msg);
-        },
-        async: true
-    });
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////////
 function getLocationsAndPopulateMapAndMatrix(currentTab, datefrom, dateto, string) {
-    var url = homePath + "/mapService.asmx/getLocations" + currentTab;
-    var thedatasent = "{'targetDateFrom':'" + datefrom + "'" + (currentTab === "TrendingData" ? ", 'measurementType': '" + $('#trendingDataSelection').val() + "'" : "") + " , 'targetDateTo':'" + dateto + "' , 'userName':'" + postedUserName + "'" + (currentTab === "TrendingData" ? ", 'dataType': '" + $('#trendingDataTypeSelection').val() + "'" : "") + "}";
+    cache_Map_Matrix_Data = null;
+    cache_Map_Matrix_Data_Date_From = null;
+    cache_Map_Matrix_Data_Date_To = null;
+    var url = homePath + "mapService.asmx/getLocations" + currentTab;
 
-    if (currentTab !== "TrendingData") {
-        thedatasent = {
-            targetDateFrom: datefrom,
-            targetDateTo: dateto,
-            userName: postedUserName
-        };
-    } else {
+    var thedatasent;
+    if (currentTab == "TrendingData") {
         thedatasent = {
             contourQuery: {
                 StartDate: datefrom,
                 EndDate: dateto,
                 DataType: $('#trendingDataTypeSelection').val(),
                 ColorScaleName: $('#contourColorScaleSelect').val(),
-                UserName: postedUserName
+                UserName: postedUserName,
+                MeterIds: meterList.selectedIdsString()
             }
         };
-        
     }
 
-    cache_Map_Matrix_Data = null;
-    cache_Map_Matrix_Data_Date_From = null;
-    cache_Map_Matrix_Data_Date_To = null;
-
-    setMapHeaderDate(datefrom, dateto);
-
-    // Jeff Walker
-    $.ajax({
-        datefrom: datefrom,
-        dateto: dateto,
-        type: "POST",
-        url: url,
-        data: JSON.stringify(thedatasent),
-        contentType: "application/json; charset=utf-8",
-        dataType: 'json',
-        cache: true,
-        success: function (data) {
-            cache_Map_Matrix_Data_Date_From = this.datefrom;
-            cache_Map_Matrix_Data_Date_To = this.dateto;
+    if (currentTab != 'TrendingData') {
+        dataHub.getMeterLocations(datefrom, dateto, meterList.selectedIdsString(), currentTab, userId, globalContext).done(function (data) {
+            data.JSON = JSON.parse(data.Data);
+            cache_Map_Matrix_Data_Date_From = datefrom;
+            cache_Map_Matrix_Data_Date_To = dateto;
             cache_Map_Matrix_Data = data;
-
-            plotContourMapLocations(data.d, currentTab, this.datefrom, this.dateto, string);
-            plotGridLocations(data, currentTab, this.datefrom, this.dateto, string);
-
-        },
-        failure: function (msg) {
+            plotMapLocations(data, currentTab, datefrom, dateto);
+            plotGridLocations(data, currentTab, datefrom, dateto, string);
+        }).fail(function (msg) {
             alert(msg);
-        },
-        async: true
-    });
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////////
-
-function getStatusColorForGridElement( data ) {
-    
-    switch (currentTab) {
-        case "Events":
-            if (data[0] == 0 && data[1] == 0 && data[2] == 0 && data[3] == 0 && data[4] == 0 && data[5] == 0)
-                return ("#0E892C");
-            if (data[0] > 0)  // Interruptions
-                return (globalcolorsEvents[5]);
-            if (data[1] > 0)  // Faults
-                return (globalcolorsEvents[4]);
-            if (data[2] > 0)  // Sags
-                return (globalcolorsEvents[3]);
-            if (data[3] > 0)  // Transients
-                return (globalcolorsEvents[2]);
-            if (data[4] > 0)  // Swells
-                return (globalcolorsEvents[1]);
-            if (data[5] > 0)  // Others
-                return (globalcolorsEvents[0]);
-            break;
-        case "Disturbances":
-            if (data[0] == 0 && data[1] == 0 && data[2] == 0 && data[3] == 0 && data[4] == 0 && data[5] == 0) 
-                return ("#0E892C");
-            if (data[0] > 0)  // 5
-                return (globalcolorsEvents[5]);
-            if (data[1] > 0)  // 4
-                return (globalcolorsEvents[4]);
-            if (data[2] > 0)  // 3
-                return (globalcolorsEvents[3]);
-            if (data[3] > 0)  // 2
-                return (globalcolorsEvents[2]);
-            if (data[4] > 0)  // 1
-                return (globalcolorsEvents[1]);
-            if (data[5] > 0)  // 0
-                return (globalcolorsEvents[0]);
-            break;
-        case "Completeness":
-            //[0]ExpectedPoints
-            //[1]GoodPoints
-            //[2]LatchedPoints
-            //[3]UnreasonablePoints
-            //[4]NoncongruentPoints
-            //[5]DuplicatePoints
-
-            if (data[0] == 0 && data[1] == 0 && data[2] == 0 && data[3] == 0 && data[4] == 0 && data[5] == 0)
-                return (globalcolorsDQ[0]);
-            if (data[0] == 0 || data[1] == 0)
-                return ("#CCCCCC");
-
-            var percentage = Math.floor(((data[1] + data[2] + data[3] +data[4]) / data[0]) * 100);
-            if (percentage > 100) 
-                return (globalcolorsDQ[6]);
-            if (percentage >= 98) 
-                return (globalcolorsDQ[5]);
-            if (percentage >= 90) 
-                return (globalcolorsDQ[4]);
-            if (percentage >= 70) 
-                return (globalcolorsDQ[3]);
-            if (percentage >= 50) 
-                return (globalcolorsDQ[2]);
-            if (percentage > 0) 
-                return (globalcolorsDQ[1]);
-            return (globalcolorsDQ[0]);
-
-            break;
-
-        case "Correctness":
-            //[0]ExpectedPoints
-            //[1]GoodPoints
-            //[2]LatchedPoints
-            //[3]UnreasonablePoints
-            //[4]NoncongruentPoints
-            //[5]DuplicatePoints
-            if (data[0] == 0 && data[1] == 0 && data[2] == 0 && data[3] == 0 && data[4] == 0 && data[5] == 0) 
-                return (globalcolorsDQ[0]);
-            if (data[0] == 0 || data[1] == 0) 
-                return ("#CCCCCC");
-
-            var percentage = Math.floor((data[1]/(data[1] + data[2] + data[3] + data[4])) * 100);
-            if (percentage > 100) 
-                return (globalcolorsDQ[6]);
-            if (percentage >= 98) 
-                return (globalcolorsDQ[5]);
-            if (percentage >= 90) 
-                return (globalcolorsDQ[4]);
-            if (percentage >= 70) 
-                return (globalcolorsDQ[3]);
-            if (percentage >= 50) 
-                return (globalcolorsDQ[2]);
-            if (percentage > 0) 
-                return (globalcolorsDQ[1]);
-            return (globalcolorsDQ[0]);
-            break;
-
-        case "Trending":
-                    
-            if (data[0] == 0 && data[1] == 0) 
-                return ("#339933");
-            else if (data[1] > 0 && data[0] > 0) 
-                return ("#FF7700");
-            else if (data[0] > 0 && data[1] == 0) 
-                return ("#FF0000");
-            else if (data[1] > 0 && data[0] == 0) 
-                return ("#FFCC00");
-            break;
-
-
-        case "TrendingData":
-            if ($('#trendingDataTypeSelection').val() === "Average") {
-                if (data[2] !== null) return ("#0E892C");
-            }
-            else if ($('#trendingDataTypeSelection').val() === "Minimum") {
-                if (data[1] !== null) return ("#0E892C");
-            }
-            else if ($('#trendingDataTypeSelection').val() === "Maximum") {
-                if (data[0] !== null) return ("#0E892C");
-            }
-            break;
-
-        case "Faults":
-            if (data[0] == 0) 
-                return ("#0E892C");
-            if (data[0] > 0)  // Faults
-                return ("#FF0000");
-            break;
-
-
-        case "Breakers":
-            if (data[0] == 0 && data[1] == 0 && data[2] == 0 ) 
-                return ("#0E892C");
-            if (data[0] > 0)  // Normal
-                return (globalcolors[0]);
-
-            if (data[1] > 0)  // Late
-                return (globalcolors[1]);
-
-            if (data[2] > 0)  // Indeterminate
-                return (globalcolors[2]);
-
-            break;
-
-        default:
-            break;
+        });
     }
-    return ("#000000");
+    else {
+        dataHub.getLocationsTrendingData(thedatasent.contourQuery).done(function (data) {
+            cache_Map_Matrix_Data_Date_From = data.DateFrom;
+            cache_Map_Matrix_Data_Date_To = data.DateTo;
+            cache_Map_Matrix_Data = data;
+            data.JSON = data.Locations;
+            plotMapLocations(data, currentTab, data.DateFrom, data.DateTo, string);
+            plotGridLocations(data, currentTab, data.DateFrom, data.DateTo, string);
+        }).fail(function (msg) {
+            alert(msg);
+        });
+    }
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////
 
-function populateGridMatrix(data, siteID, siteName) {
+function populateGridMatrix(data, siteID, siteName, colors) {
     var matrixItemID = "#" + "matrix_" + siteID + "_box_" + currentTab;
 
     $(matrixItemID).empty();
@@ -1836,558 +2119,193 @@ function populateGridMatrix(data, siteID, siteName) {
 
     $(matrixItemID).append("<div style='font-size: 1em'><div class='faultgridtitle'>" + siteName + "</div>");
 
-    var theGridColor = getStatusColorForGridElement(data);
+    var theGridColor = getColorsForTab(data, colors);
 
     $(matrixItemID).css("background-color", theGridColor);
 
-    if (theGridColor != "#0E892C" && theGridColor != "#777777") {
-        DrawGridSparklines(data, siteID, siteName, matrixItemID);
-        $(matrixItemID).append("</div>");
+    if (parseInt(data.Count) > 0) {
+        DrawGridSparklines(data, siteID, siteName, matrixItemID, colors);
     }
 
-        $(matrixItemID).click(function (e) {
+    $(matrixItemID).click(function (e) {
 
-            if (!e.shiftKey && !e.ctrlKey ) {
-                $('#siteList').multiselect('uncheckAll');                    
-            }
+        if (!e.shiftKey && !e.ctrlKey ) {
+            meterList.unselectAll()
+        }
 
-            var thisselectedindex = 0;
-
-            $('#siteList').multiselect("widget").find(":checkbox").each(function(item) {
-                if (this.title == siteName) {
-                    thisselectedindex = item;
-                }
-            });
+        var thisselectedindex = meterList.indexOf(siteID)
 
 
-            $('#siteList').multiselect("widget").find(":checkbox").each(function (item) {
+        $.each(meterList.list,function (i,item) {
 
-                if (e.shiftKey) {
+            if (e.shiftKey) {
 
-                    if (thisselectedindex > lastselectedindex) {
-                        if ((item >= lastselectedindex) && (item <= thisselectedindex)) {
-                            if (this.checked == false) this.click();
-                        } else {
-                            if (this.checked == true) this.click();
-                        }
+                if (thisselectedindex > lastselectedindex) {
+                    if ((i >= lastselectedindex) && (i <= thisselectedindex)) {
+                        if (item.Selected == false) item.Selected = true;
                     } else {
-                        if ((item >= thisselectedindex) && (item <= lastselectedindex)) {
-                            if (this.checked == false) this.click();
-                        } else {
-                            if (this.checked == true) this.click();
-                        }
+                        if (item.Selected == true) item.Selected = false;
                     }
-                } else if (item == thisselectedindex) {
-                        this.click();
-                        return(false);
+                } else {
+                    if ((i >= thisselectedindex) && (i <= lastselectedindex)) {
+                        if (item.Selected == false) item.Selected = true;
+                    } else {
+                        if (item.Selected == true) item.Selected = false;
+                    }
                 }
-            });
-
-            if (!e.shiftKey && !e.ctrlKey) {
-
-                lastselectedindex = thisselectedindex;
-
-            }
-
-            updateGridWithSelectedSites();
-
-            if (e.ctrlKey) {
-                if (selectiontimeout != null) clearTimeout(selectiontimeout);
-                selectiontimeout = setTimeout('selectsitesincharts()', 1500);
-            } else {
-                selectsitesincharts();
+            } else if (i == thisselectedindex) {
+                item.Selected = true;
+                return (false);
             }
         });
 
+        if (!e.shiftKey && !e.ctrlKey) {
+            lastselectedindex = thisselectedindex;
+        }
+
+        updateGridWithSelectedSites();
+
+        if (e.ctrlKey) {
+            if (selectiontimeout != null) clearTimeout(selectiontimeout);
+            selectiontimeout = setTimeout('selectsitesincharts()', 100);
+        } else {
+
+
+            if ($('#deviceFilterList').val() != 'ClickEvent') {
+                cache_Meter_Filter = $('#deviceFilterList').val();
+                $('#deviceFilterList').append(new Option('Click Event', 'ClickEvent'));
+                $('#deviceFilterList').val('ClickEvent');
+
+            }
+
+            selectsitesincharts();
+        }
+
+        $('#meterSelected').text(meterList.selectedCount());
+
+    });
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////
 
 function updateGridWithSelectedSites() {
-        
-    $('#siteList').multiselect("widget").find(":checkbox").each(function () {
-        var matrixItemID = "#" + "matrix_" + this.value + "_box_" + currentTab;
-        if (this.checked) {
-            $(matrixItemID).switchClass('matrixButtonBlack', 'matrixButton');
+    if (meterList == null) return;
+
+    $('#theMap' + currentTab).find('.leafletCircle').addClass('circleButtonBlack');
+
+    meterList.list.forEach(function (item) {
+        var matrixItemID = "#" + "matrix_" + item.ID + "_box_" + currentTab;
+        if (item.Selected) {
+            $(matrixItemID).removeClass('matrixButtonBlack').addClass('matrixButton');
+            $('#theMap' + currentTab).find('.leafletCircle').children('[id*=' + item.Name.replace(/[^A-Za-z0-9]/g, '') + ']').parent().removeClass('circleButtonBlack')
         } else {
-            $(matrixItemID).switchClass('matrixButton', 'matrixButtonBlack');
+            $(matrixItemID).removeClass('matrixButton').addClass('matrixButtonBlack');
         }
-    });  
+
+
+    });
 }
 
-
 //////////////////////////////////////////////////////////////////////////////////////////////
-function DrawGridSparklines(data, siteID, siteName, matrixItemID) {
+function DrawGridSparklines(data, siteID, siteName, matrixItemID, colors) {
     switch (currentTab) {
         case "Events":
-            populateGridSparklineEvents(data, siteID, siteName);
-            break;
-
         case "Disturbances":
-            populateGridSparklineDisturbances(data, siteID, siteName);
-            break;
-
-        case "Trending":
-            
-
-            break;
-
-        case "Faults":
-            $(matrixItemID).append("<div unselectable='on' class='faultgridcount'>" + data[0] + "</div>");
-            $(matrixItemID)[0].title = siteName + " Faults: " + data[0];
-            break;
-
         case "Breakers":
-            populateGridSparklineBreakers(data, siteID, siteName);
+            populateGridSparklines(data, siteID, siteName, colors);
             break;
-
+        case "Faults":
+            $(matrixItemID).append("<div unselectable='on' class='faultgridcount'>" + data.Count + "</div>");
+            $(matrixItemID)[0].title = siteName + " Faults: " + data.Count;
+            break;
         case "Completeness":
-            populateGridSparklineCompleteness(data, siteID, siteName, false);
-            break;
-
         case "Correctness":
-            populateGridSparklineCorrectness(data, siteID, siteName, false);
-            break;
-
+            populateGridSparklineDataQuality(data, siteID, siteName, true, colors);
+            break;  
+        case "Trending":
+        case "TrendingData":
         default:
             break;
     }
 }
 //////////////////////////////////////////////////////////////////////////////////////////////
     
-function populateGridSparklineCorrectness(data, siteID, siteName, makespark) {
-
+function populateGridSparklineDataQuality(data, siteID, siteName, makespark, colors) {
     var sparkvalues = [];
 
     var colorMap = [];
 
-    var completeness = data[1] + data[2] + data[3] + data[4];
+    var completeness = parseInt(data.GoodPoints) + parseInt(data.LatchedPoints) + parseInt(data.NoncongruentPoints) + parseInt(data.UnreasonablePoints);
 
-    sparkvalues = [data[0], completeness, data[5]];
-
-    colorMap = globalcolorsDQ;
+    sparkvalues = [parseInt(data.ExpectedPoints), completeness, parseInt(data.DuplicatePoints)];
 
     var matrixItemID = "#" + "matrix_" + siteID + "_box_" + currentTab;
 
     $(matrixItemID).append($("<div unselectable='on' class='sparkbox' id='" + "sparkbox_" + siteID + "_box_" + currentTab + "'/>"));
 
-    if (data[0] == 0) {
-        $(matrixItemID)[0].title = "No Data Available";
-
-    } else {
-        var title = siteName;
-
-        title += "\nGood: " + (data[1] / completeness * 100).toFixed(0) + "%";
-        title += "\nLatched: " + (data[2] / completeness * 100).toFixed(0) + "%";
-        title += "\nUnreasonable: " + (data[3] / completeness * 100).toFixed(0) + "%";
-        title += "\nNoncongruent: " + (data[4] / completeness * 100).toFixed(0) + "%";
-
-        $(matrixItemID)[0].title = title;
-    }
+    var colorMap = ["#FF0000","#00FF00","#0000FF"]
 
     if (!makespark) return;
-
-    //var sparklinedraw = function (height, barWidth) {
-
-        $("#sparkbox_" + siteID + "_box_" + currentTab).sparkline(sparkvalues, {
-            type: 'bar',
-            height: '10px',
-            barWidth: '3px',
-            siteid: siteName,
-            //datadate: thedate,
-            borderWidth: 0,
-            nullColor: '#f5f5f5',
-            zeroColor: '#f5f5f5',
-            borderColor: '#f5f5f5',
-            colorMap: colorMap,
-
-            tooltipFormatter: function (sp, options, fields) {
-                var returnvalue = '<div unselectable="on" class="jqsheader">' + options.userOptions.siteid + '</div>';// + ' ' + options.userOptions.datadate
-
-                switch (fields[0].offset) {
-                    case 0:
-                        returnvalue += '<div unselectable="on" class="jqsfield"><span style="color: ' + fields[0].color + '">&#9679;</span> Expected: ' + fields[0].value + '</div>';
-                        break;
-                    case 1:
-                        returnvalue += '<div unselectable="on" class="jqsfield"><span style="color: ' + fields[0].color + '">&#9679;</span> Received: ' + fields[0].value + '</div>';
-                        break;
-                    case 2:
-                        returnvalue += '<div unselectable="on" class="jqsfield"><span style="color: ' + fields[0].color + '">&#9679;</span> Duplicate: ' + fields[0].value + '</div>';
-                        break;
-                }
-
-                return (returnvalue);
-            }
-        });
-    //}
-
-    //var sparkResize;
-
-    //$(document).on('matrixResize', function (e) {
-    //    clearTimeout(sparkResize);
-
-    //    sparkResize = setTimeout(function () { sparklinedraw($('.sparkbox').height(), $('.sparkbox').width() / 10); }, 500);
-    //});
-
-    //sparklinedraw($('.sparkbox').height() - 1, $('.sparkbox').width() / 10);
-
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////////
-
-function populateGridSparklineCompleteness(data, siteID, siteName, makespark) {
-
-    var sparkvalues = [];
-
-    var colorMap = [];
-
-    var completeness = data[1] + data[2] + data[3] + data[4];
-
-    sparkvalues = [data[0], completeness, data[5]];
-
-    colorMap = globalcolors;
-
-    var matrixItemID = "#" + "matrix_" + siteID + "_box_" + currentTab;
-
-    $(matrixItemID).append($("<div unselectable='on' class='sparkbox' id='" + "sparkbox_" + siteID + "_box_" + currentTab + "'/>"));
-
-    if (data[0] == 0) {
-        $(matrixItemID)[0].title = "No Data Available";
-
-    } else {
-        $(matrixItemID)[0].title = siteName + "\nExpected: " + data[0] + "\nReceived: " + (completeness / data[0] * 100).toFixed(2) + "%\nDuplicate: " + (data[5] / data[0] * 100).toFixed(2) + "%";
-
-    }
-
-    if (!makespark) return;
-
-    //var sparklinedraw = function (height, barWidth) {
-        $("#sparkbox_" + siteID + "_box_" + currentTab).sparkline(sparkvalues, {
-            type: 'bar',
-            height: '10px',
-            barWidth: '3px',
-            siteid: siteName,
-            //datadate: thedate,
-            borderWidth: 0,
-            nullColor: '#f5f5f5',
-            zeroColor: '#f5f5f5',
-            borderColor: '#f5f5f5',
-            colorMap: colorMap,
-
-            tooltipFormatter: function (sp, options, fields) {
-                var returnvalue = '<div unselectable="on" class="jqsheader">' + options.userOptions.siteid + '</div>';// + ' ' + options.userOptions.datadate
-
-                switch (fields[0].offset) {
-                    case 0:
-                        returnvalue += '<div unselectable="on" class="jqsfield"><span style="color: ' + fields[0].color + '">&#9679;</span> Expected: ' + fields[0].value + '</div>';
-                        break;
-                    case 1:
-                        returnvalue += '<div unselectable="on" class="jqsfield"><span style="color: ' + fields[0].color + '">&#9679;</span> Received: ' + fields[0].value + '</div>';
-                        break;
-                    case 2:
-                        returnvalue += '<div unselectable="on" class="jqsfield"><span style="color: ' + fields[0].color + '">&#9679;</span> Duplicate: ' + fields[0].value + '</div>';
-                        break;
-                }
-
-                return (returnvalue);
-            }
-        });
-    //}
-
-    //var sparkResize;
-
-    //$(document).on('matrixResize', function (e) {
-    //    clearTimeout(sparkResize);
-
-    //    sparkResize = setTimeout(function () { sparklinedraw($('.sparkbox').height(), $('.sparkbox').width() / 10); }, 500);
-    //});
-
-    //sparklinedraw($('.sparkbox').height() - 1, $('.sparkbox').width() / 10);
-
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////////
-
-function populateGridSparklineEvents(data, siteID, siteName) {
-
-    var sparkvalues = [data[0], data[1], data[2], data[3], data[4], data[5]];
-
-    var matrixItemID = "#" + "matrix_" + siteID + "_box_" + currentTab;
-
-    $(matrixItemID).append($("<div unselectable='on' class='sparkbox' id='" + "sparkbox_" + siteID + "_box_" + currentTab + "'/>"));
-
-    $(matrixItemID).tooltip({
-        position: {
-            my: "center bottom-20",
-            at: "center top",
-            using: function( position, feedback ) {
-                $( this ).css( position );
-                $( "<div>" )
-                    .addClass( "arrow" )
-                    .addClass( feedback.vertical )
-                    .addClass( feedback.horizontal )
-                    .appendTo( this );
-            }
-        },
-
-        content: function() {
+    $("#sparkbox_" + siteID + "_box_" + currentTab).sparkline(sparkvalues, {
+        type: 'bar',
+        tooltipFormatter: function (sp, options, fields) {
             var thetitle = "";
-            thetitle += "<table>";
-            thetitle += "<tr><td colspan=2 align='center'>" + siteName + "</td></tr>";
-            thetitle += "<tr><td>Interruptions</td><td align='right'>" + data[0] + "</td></tr>";
-            thetitle += "<tr><td>Faults</td><td align='right'>" + data[1] + "</td></tr>";
-            thetitle += "<tr><td>Sags</td><td align='right'>" + data[2] + "</td></tr>";
-            thetitle += "<tr><td>Transients</td><td align='right'>" + data[3] + "</td></tr>";
-            thetitle += "<tr><td>Swells</td><td align='right'>" + data[4] + "</td></tr>";
-            thetitle += "<tr><td>Others</td><td align='right'>" + data[5] + "</td></tr>";
+            thetitle += "<table class='table' style='margin-right: 10px'>";
+            thetitle += "<tr><td colspan=2 align='center'>" + data.Name + "</td></tr>";
+            thetitle += "<tr><td><span style='color: #ff0000'>&#9679;</span> Expected:</td><td align='right'>" + data.ExpectedPoints + "</td></tr>";
+            thetitle += "<tr><td><span style='color: #00ff00'>&#9679;</span> Received:</td><td align='right'>" + completeness + "</td></tr>";
+            thetitle += "<tr><td><span style='color: #0000ff'>&#9679;</span> Duplicate:</td><td align='right'>" + data.DuplicatePoints + "</td></tr>";
             thetitle += "</table>";
             return (thetitle);
         }
     });
 
-    //$(matrixItemID)[0].title = thetitle;
-
-    //$(matrixItemID)[0].title = siteName + "\nInterruptions: " + data[0] + "\nFaults: " + data[1] + "\nSags: " + data[2] + "\nTransients: " + data[3] + "\nSwells: " + data[4] + "\nOthers: " + data[5];
-    //var sparklinedraw = function (height, barWidth) {
-        $("#sparkbox_" + siteID + "_box_" + currentTab).sparkline(sparkvalues, {
-            type: 'bar',
-            height: '10px',
-            barWidth: '3px',
-            siteid: siteName,
-            //datadate: thedate,
-            borderWidth: 0,
-            nullColor: '#f5f5f5',
-            zeroColor: '#f5f5f5',
-            borderColor: '#f5f5f5',
-            colorMap: globalcolorsEvents,
-
-            tooltipFormatter: function (sp, options, fields) {
-                var returnvalue = '<div unselectable="on" class="jqsheader">' + options.userOptions.siteid + '</div>';// + ' ' + options.userOptions.datadate
-
-                switch (fields[0].offset) {
-
-                    case 0:
-                        returnvalue += '<div unselectable="on" class="jqsfield"><span style="color: ' + fields[0].color + '">&#9679;</span> Interruptions: ' + fields[0].value + '</div>';
-                        break;
-                    case 1:
-                        returnvalue += '<div unselectable="on" class="jqsfield"><span style="color: ' + fields[0].color + '">&#9679;</span> Faults: ' + fields[0].value + '</div>';
-                        break;
-                    case 2:
-                        returnvalue += '<div unselectable="on" class="jqsfield"><span style="color: ' + fields[0].color + '">&#9679;</span> Sags: ' + fields[0].value + '</div>';
-                        break;
-                    case 3:
-                        returnvalue += '<div unselectable="on" class="jqsfield"><span style="color: ' + fields[0].color + '">&#9679;</span> Transients: ' + fields[0].value + '</div>';
-                        break;
-                    case 4:
-                        returnvalue += '<div unselectable="on" class="jqsfield"><span style="color: ' + fields[0].color + '">&#9679;</span> Swells: ' + fields[0].value + '</div>';
-                        break;
-                    case 5:
-                        returnvalue += '<div unselectable="on" class="jqsfield"><span style="color: ' + fields[0].color + '">&#9679;</span> Others: ' + fields[0].value + '</div>';
-                        break;
-
-                }
-
-                return (returnvalue);
-            }
-        });
-    //}
-
-    //var sparkResize;
-
-    //$(document).on('matrixResize', function (e) {
-    //    clearTimeout(sparkResize);
-
-    //    sparkResize = setTimeout(function () { sparklinedraw($('.sparkbox').height(), $('.sparkbox').width()/10); }, 500);
-    //});
-
-    //sparklinedraw($('.sparkbox').height() - 1, $('.sparkbox').width() / 10);
 }
-
 //////////////////////////////////////////////////////////////////////////////////////////////
 
-function populateGridSparklineDisturbances(data, siteID, siteName) {
+function populateGridSparklines(data, siteID, siteName, colors) {
+    var sparkValues = {}; // = { "Interruption": { data: data[0], color: globalcolorsEvents[5] }, "Fault": { data: data[1], color: globalcolorsEvents[4] }, "Sag": { data: data[2], color: globalcolorsEvents[3] }, "Transient": { data: data[3], color: globalcolorsEvents[2] }, "Swell": { data: data[4], color: globalcolorsEvents[1] }, "Other": { data: data[5], color: globalcolorsEvents[0] } };
+    $.each(Object.keys(data), function (i, key) {
+        if (key != "Count" && key != "ID" && key != "Name" && key != "Latitude" && key != "Longitude")
+            sparkValues[key] = { data: data[key], color: colors[key] };
+    });
 
-    var sparkvalues = [data[0], data[1], data[2], data[3], data[4], data[5]];
+    var numbers = [];
+    var color = [];
+    $.each($.map(disabledList[currentTab], function (data, key) { if (!data) return key }), function (index, field) {
+        if (sparkValues[field] != null) {
+            numbers.push(parseInt(sparkValues[field].data));
+            color.push(sparkValues[field].color);
+        }
+    });
 
     var matrixItemID = "#" + "matrix_" + siteID + "_box_" + currentTab;
 
     $(matrixItemID).append($("<div unselectable='on' class='sparkbox' id='" + "sparkbox_" + siteID + "_box_" + currentTab + "'/>"));
 
-    $(matrixItemID).tooltip({
-        position: {
-            my: "center bottom-20",
-            at: "center top",
-            using: function (position, feedback) {
-                $(this).css(position);
-                $("<div>")
-                    .addClass("arrow")
-                    .addClass(feedback.vertical)
-                    .addClass(feedback.horizontal)
-                    .appendTo(this);
-            }
-        },
-
-        content: function () {
+    $("#sparkbox_" + siteID + "_box_" + currentTab).sparkline(numbers, {
+        type: 'bar',
+        colorMap: color,
+        tooltipFormatter: function (sparkline, options, fields) {
             var thetitle = "";
-            thetitle += "<table>";
-            thetitle += "<tr><td colspan=2 align='center'>" + siteName + "</td></tr>";
-            thetitle += "<tr><td>5</td><td align='right'>" + data[0] + "</td></tr>";
-            thetitle += "<tr><td>4</td><td align='right'>" + data[1] + "</td></tr>";
-            thetitle += "<tr><td>3</td><td align='right'>" + data[2] + "</td></tr>";
-            thetitle += "<tr><td>2</td><td align='right'>" + data[3] + "</td></tr>";
-            thetitle += "<tr><td>1</td><td align='right'>" + data[4] + "</td></tr>";
-            thetitle += "<tr><td>0</td><td align='right'>" + data[5] + "</td></tr>";
+            thetitle += "<table class='table' style='margin-right: 10px'>";
+            thetitle += "<tr><td colspan=2 align='center'>" + data.Name + "</td></tr>";
+            $.each(Object.keys(data), function (i, key) {
+                if (key != "Count" && key != "ID" && key != "Name" && key != "Latitude" && key != "Longitude")
+                    thetitle += "<tr><td><span style='color:"+colors[key]+"'>&#9679;</span>" + key + ":</td><td align='right'>" + data[key] + "</td></tr>";
+            });
             thetitle += "</table>";
-            return (thetitle);
+            return thetitle
         }
     });
 
-    //$(matrixItemID)[0].title = thetitle;
-
-    //$(matrixItemID)[0].title = siteName + "\nInterruptions: " + data[0] + "\nFaults: " + data[1] + "\nSags: " + data[2] + "\nTransients: " + data[3] + "\nSwells: " + data[4] + "\nOthers: " + data[5];
-
-    //var sparklinedraw = function (height, barWidth) {
-
-        $("#sparkbox_" + siteID + "_box_" + currentTab).sparkline(sparkvalues, {
-            type: 'bar',
-            height: '10px',
-            barWidth: '3px',
-            siteid: siteName,
-            //datadate: thedate,
-            borderWidth: 0,
-            nullColor: '#f5f5f5',
-            zeroColor: '#f5f5f5',
-            borderColor: '#f5f5f5',
-            colorMap: globalcolorsEvents,
-
-            tooltipFormatter: function (sp, options, fields) {
-                var returnvalue = '<div unselectable="on" class="jqsheader">' + options.userOptions.siteid + '</div>';// + ' ' + options.userOptions.datadate
-
-                switch (fields[0].offset) {
-
-                    case 0:
-                        returnvalue += '<div unselectable="on" class="jqsfield"><span style="color: ' + fields[0].color + '">&#9679;</span> 5: ' + fields[0].value + '</div>';
-                        break;
-                    case 1:
-                        returnvalue += '<div unselectable="on" class="jqsfield"><span style="color: ' + fields[0].color + '">&#9679;</span> 4: ' + fields[0].value + '</div>';
-                        break;
-                    case 2:
-                        returnvalue += '<div unselectable="on" class="jqsfield"><span style="color: ' + fields[0].color + '">&#9679;</span> 3: ' + fields[0].value + '</div>';
-                        break;
-                    case 3:
-                        returnvalue += '<div unselectable="on" class="jqsfield"><span style="color: ' + fields[0].color + '">&#9679;</span> 2: ' + fields[0].value + '</div>';
-                        break;
-                    case 4:
-                        returnvalue += '<div unselectable="on" class="jqsfield"><span style="color: ' + fields[0].color + '">&#9679;</span> 1: ' + fields[0].value + '</div>';
-                        break;
-                    case 5:
-                        returnvalue += '<div unselectable="on" class="jqsfield"><span style="color: ' + fields[0].color + '">&#9679;</span> 0: ' + fields[0].value + '</div>';
-                        break;
-
-                }
-
-                return (returnvalue);
-            }
-        });
-    //}
-    //var sparkResize;
-
-    //$(document).on('matrixResize', function (e) {
-    //    clearTimeout(sparkResize);
-
-    //    sparkResize = setTimeout(function () { sparklinedraw($('.sparkbox').height(), $('.sparkbox').width() / 10); }, 500);
-    //});
-
-    //sparklinedraw($('.sparkbox').height() - 1, $('.sparkbox').width() / 10);
-
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////////
-
-function populateGridSparklineBreakers(data, siteID, siteName) {
-
-    var sparkvalues = [];
-
-    var colorMap = [];
-
-    sparkvalues = [data[0], data[1], data[2]];
-
-    colorMap = globalcolors; //['#FF0000', '#CC6600', '#FF8800'];
-
-    var matrixItemID = "#" + "matrix_" + siteID + "_box_" + currentTab;
-
-    $(matrixItemID).append($("<div unselectable='on' class='sparkbox' id='" + "sparkbox_" + siteID + "_box_" + currentTab + "'/>"));
-
-    $(matrixItemID)[0].title = siteName + "\nNormal: " + data[0] + "\nLate: " + data[1] + "\nIndeterminate: " + data[2];
-
-    //var sparklinedraw = function (height, barWidth) {
-
-        $("#sparkbox_" + siteID + "_box_" + currentTab).sparkline(sparkvalues, {
-            type: 'bar',
-            height: '10px',
-            barWidth: '3px',
-            siteid: siteName,
-            //datadate: thedate,
-            borderWidth: 0,
-            nullColor: '#f5f5f5',
-            zeroColor: '#f5f5f5',
-            borderColor: '#f5f5f5',
-            colorMap: colorMap,
-
-            tooltipFormatter: function (sp, options, fields) {
-                var returnvalue = '<div unselectable="on" class="jqsheader">' + options.userOptions.siteid + '</div>';// + ' ' + options.userOptions.datadate
-
-                switch (fields[0].offset) {
-
-                    case 0:
-                        returnvalue += '<div unselectable="on" class="jqsfield"><span style="color: ' + fields[0].color + '">&#9679;</span> Normal: ' + fields[0].value + '</div>';
-                        break;
-                    case 1:
-                        returnvalue += '<div unselectable="on" class="jqsfield"><span style="color: ' + fields[0].color + '">&#9679;</span> Late: ' + fields[0].value + '</div>';
-                        break;
-                    case 2:
-                        returnvalue += '<div unselectable="on" class="jqsfield"><span style="color: ' + fields[0].color + '">&#9679;</span> Indeterminate: ' + fields[0].value + '</div>';
-                        break;
-                }
-                return (returnvalue);
-            }
-        });
-    //}
-
-    //var sparkResize;
-
-    //$(document).on('matrixResize', function (e) {
-    //    clearTimeout(sparkResize);
-
-    //    sparkResize = setTimeout(function () { sparklinedraw($('.sparkbox').height(), $('.sparkbox').width() / 10); }, 500);
-    //});
-
-    //sparklinedraw($('.sparkbox').height() - 1, $('.sparkbox').width() / 10);
-
-}
-//////////////////////////////////////////////////////////////////////////////////////////////
-
-function SelectAdd(theControlID,theValue,theText,selected) {
-
-    var exists = false;
-
-    $('#' + theControlID + ' option').each(function () {
-        if (this.innerHTML == theText) {
-            exists = true;
-            return false;
-        }
-    });
-
-    if (!exists) {
-        $('#' + theControlID).append("<option value='" + theValue + "' " + selected+ ">" + theText + "</option>");
-    }
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////
 
 function showSiteSet(thecontrol) {
 
-    var mapormatrix = $("#mapGrid")[0].value;
+    var mapormatrix = $("#map" + currentTab + "Grid")[0].value;
 
     if (mapormatrix == "Grid") {
 
@@ -2404,7 +2322,7 @@ function showSiteSet(thecontrol) {
 
             case "Events":
                 $.each(gridchildren.children, function (key, value) {
-                    if ( $(value).data("gridstatus") != "0")
+                    if ($(value).css('background-color') != "rgb(14, 137, 44)" && $(value).css('background-color') != "#0E892C")
                     {
                         $(value).show();
                     }
@@ -2418,7 +2336,7 @@ function showSiteSet(thecontrol) {
 
             case "NoEvents":
                 $.each(gridchildren.children, function (key, value) {
-                    if ($(value).data("gridstatus") != "0") {
+                    if ($(value).css('background-color') != "rgb(14, 137, 44)" && $(value).css('background-color') != "#0E892C") {
                         $(value).hide();
                     }
                     else {
@@ -2480,16 +2398,8 @@ function showSiteSet(thecontrol) {
 
 
             case "SelectedSites":
-
-                var selectedIDs = GetCurrentlySelectedSites();
-
-                $.each(gridchildren.children, function (key, value) {
-                    if ($.inArray ($(value).data('siteid'), selectedIDs) > -1) {
-                        $(value).show();
-                    } else {
-                        $(value).hide();
-                    }
-                });
+                $('.matrixButton[id*=' + currentTab + ']').show();
+                $('.matrixButtonBlack[id*='+ currentTab +']').hide();
                 break;
 
             case "None":
@@ -2558,17 +2468,11 @@ function showSiteSet(thecontrol) {
                 break;
 
             case "SelectedSites":
-                var selectedIDs = GetCurrentlySelectedSites();
-                $.each($(leafletMap[currentTab].getPanes().markerPane).children(), function (index, marker) {
-                    if ($.inArray($(marker).children().attr('id').replace('-', '|'), selectedIDs) > -1)
-                        $(marker).show();
-                    else
-                        $(marker).hide();
-                });
+                $('#theMap' + currentTab).find('.leafletCircle').show();
+                $('#theMap' + currentTab).find('.leafletCircle.circleButtonBlack').hide();
                 break;
 
             case "Sags":
-                var selectedIDs = GetCurrentlySelectedSites();
                 $.each($(leafletMap[currentTab].getPanes().markerPane).children(), function (index, marker) {
                     if ($(marker).children().children().attr('fill') === '#996633')
                         $(marker).show();
@@ -2578,7 +2482,6 @@ function showSiteSet(thecontrol) {
                 break;
 
             case "Swells":
-                var selectedIDs = GetCurrentlySelectedSites();
                 $.each($(leafletMap[currentTab].getPanes().markerPane).children(), function (index, marker) {
                     if ($(marker).children().children().attr('fill') === '#ff0000')
                         $(marker).show();
@@ -2621,114 +2524,43 @@ function showSiteSet(thecontrol) {
 
 //////////////////////////////////////////////////////////////////////////////////////////////
 
-function showHeatmap(thecontrol, string ) {
-    var i = 0;
-
-    var datefrom = getMapHeaderDate("From");
-    var dateto = getMapHeaderDate("To");
-
-    switch (thecontrol.value) {
-
-        case "EventCounts":
-            getEventsHeatmapCounts(currentTab, datefrom, dateto, string);
-            break;
-
-        case "MinimumSags":
-            getEventsHeatmapSags(currentTab, datefrom, dateto);
-            break;
-
-        case "MaximumSwells":
-            getEventsHeatmapSwell(currentTab, datefrom, dateto);
-            break;
-
-        case "TrendingCounts":
-            getTrendingHeatmapCounts(currentTab, datefrom, dateto, string);
-            break;
-
-        case "THD":
-            $('#HeatmapControlsTrending').show();
-            break;
-
-        case "DisturbanceCounts":
-            getDisturbancesHeatmapCounts(currentTab, datefrom, dateto, string);
-            break;
-
-        case "AnimateDisturbancecounts":
-            break;
-
-        default:
-            break;
-
-    }
-    
- 
-}
-
-/////////////////////////////////////////////////////////////////////////////////////////
-
 function plotGridLocations(locationdata, newTab, thedatefrom, thedateto) {
     /// Clear Matrix
     if ($("#theMatrix" + newTab)[0].childElementCount > 0) {
         $("#theMatrix" + newTab).empty();
     }
 
-    var selectedIDs = GetCurrentlySelectedSites();
-
     // For each data unit, build containers, add to layer based on status
-    $.each(locationdata.d.Locations, function (key, value) {
-        var theindex = $.inArray(value.name + "|" + value.id, selectedIDs);
- 
-        var item;
+    $.each(locationdata.JSON, function (key, value) {
+        var item = $("<div unselectable='on' class='matrix matrixButton noSelect' id='" + "matrix_" + value.ID + "_box_" + newTab + "'/>");
 
-        if (theindex > -1) {
-            item = $("<div unselectable='on' class='matrix matrixButton noselect' id='" + "matrix_" + value.id + "_box_" + newTab + "'/>");
-
-        } else {
-            item = $("<div unselectable='on' class='matrix matrixButtonBlack noselect' id='" + "matrix_" + value.id + "_box_" + newTab + "'/>");
-        }
-
-        item.data('gridstatus', value.status);
-        item.data('siteid', value.name + "|" + value.id);
-        //item.status = value.status;
+        item.data('gridstatus', value.Event_Count);
+        item.data('siteid', value.name + "|" + value.ID);
         $("#theMatrix" + newTab).append(item);
 
     });
 
     /// Set Matrix Cell size
-    resizeMatrixCells(newTab);
-
-    $.each(locationdata.d.Locations, (function (key, value) {
-        populateGridMatrix(value.data, value.id, value.name);
-    }));
-
+    cache_Sparkline_Data = locationdata;
     showSiteSet($("#selectSiteSet" + currentTab)[0]);
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////
-/// creates markers for each geocoordinate
-/// Builds location dropdown
-/// Builds sparklines
-/// Builds Heatmap
 
-
-function plotContourMapLocations(locationdata, newTab, thedatefrom, thedateto, filter) {
-    var selectedIDs = GetCurrentlySelectedSites();
-    if (leafletMap[currentTab] !== null){
-        $.each(locationdata.Locations, function (index, data) {
-            $('#' + data.name + '-' + data.id + ' circle').attr('fill', getLeafletLocationColors(data));
-            $.each(mapMarkers[currentTab], function (mmIndex, object) {
-                if(object.id === data.id)
-                    object.marker.getPopup().setContent(getLeafletLocationPopup(data))
-            });
-        });
-    }
-    else {
+function plotMapLocations(locationdata, newTab, thedatefrom, thedateto) {
+    if (leafletMap[currentTab] == null)
         loadLeafletMap('theMap' + currentTab);
 
-        $.each(locationdata.Locations, function (index, data) {
-            var color = getLeafletLocationColors(data);
+    if (mapMarkers[currentTab].length !== 0) {
+        $.each(mapMarkers[currentTab], function (i, m) { leafletMap[currentTab].removeLayer(m.marker) });
+        mapMarkers[currentTab] = [];
+    }
 
-            var html = '<svg height="12" width="12" id="' + data.name + '-' + data.id + '">' +
+
+        $.each(locationdata.JSON, function (index, data) {
+            var color = getColorsForTab(data, locationdata.Colors);
+
+            var html = '<svg height="12" width="12" id="' + data.Name.replace(/[^A-Za-z0-9]/g, "") + '-' + data.ID + '">' +
                             '<circle cx="6" cy ="6" r="4" stroke="black" stroke-width="1" fill="' + color + '"/>' +
                        '</svg>';
 
@@ -2740,24 +2572,31 @@ function plotContourMapLocations(locationdata, newTab, thedatefrom, thedateto, f
 
             marker.on('click', function (event) {
                 if (!event.originalEvent.ctrlKey) {
-                    $('#siteList').multiselect("uncheckAll");
+                    meterList.unselectAll();
+                    $('#theMap' + currentTab).find('.leafletCircle').addClass('circleButtonBlack');
+
                 }
 
-                if ($('#siteList').multiselect("option").multiple) {
+                $.each(meterList, function (i, item) {
+                    if (item.ID == data.ID) {
+                        item.Selected = true;
+                    }
 
-                    $('#siteList').multiselect("widget").find(":checkbox").each(function () {
-                        if (this.value == data.id) {
-                            this.click();
-                        }
+                });
 
-                    });
-
-                    selectsitesincharts();
-
-                } else {
-                    $('#siteList').multiselect("widget").find(":radio[value='" + data.id + "']").each(function () { this.click(); });
-                    $('#siteList').multiselect('refresh');
+                if ($('#deviceFilterList').val() != 'ClickEvent') {
+                    cache_Meter_Filter = $('#deviceFilterList').val();
+                    $('#deviceFilterList').append(new Option('Click Event', 'ClickEvent'));
+                    $('#deviceFilterList').val('ClickEvent');
                 }
+
+                $('#meterSelected').text(meterList.selectedCount());
+
+
+                selectsitesincharts();
+
+                $('#theMap' + currentTab).find('.leafletCircle').children('[id*=' + data.Name.replace(/[^A-Za-z0-9]/g, '') + ']').parent().removeClass('circleButtonBlack')
+
 
             });
 
@@ -2768,8 +2607,9 @@ function plotContourMapLocations(locationdata, newTab, thedatefrom, thedateto, f
             marker.on('mouseout', function (event) {
                 marker.closePopup();
             });
-            if ($.inArray(data.name + "|" + data.id, selectedIDs) > -1)
-                mapMarkers[currentTab].push({ id: data.id, marker: marker });
+
+            if ($.inArray(data.Name + "|" + data.ID, meterList.selected()) > -1)
+                mapMarkers[currentTab].push({ id: data.ID, marker: marker });
         });
 
         // Hack: if displaying an overlay for animation,
@@ -2778,32 +2618,47 @@ function plotContourMapLocations(locationdata, newTab, thedatefrom, thedateto, f
             markerGroup = new L.featureGroup(mapMarkers[currentTab].map(function (a) { return a.marker; }));
             if(markerGroup.getBounds().isValid())
                 leafletMap[currentTab].fitBounds(markerGroup.getBounds());
-            leafletMap[currentTab].setMaxBounds(L.latLngBounds(L.latLng(-180,-270), L.latLng(180,270)));
+            leafletMap[currentTab].setMaxBounds(L.latLngBounds(L.latLng(-180, -270), L.latLng(180, 270)));
+            $('#contourAnimationResolutionSelect').val(leafletMap[currentTab].getZoom())
+
+        }
+        
+        if(currentTab == "TrendingData"){
+            leafletMap["TrendingData"].off('zoomend');
+            leafletMap["TrendingData"].on('zoomend', function (event) {
+                if (leafletMap["TrendingData"] != null)
+                    $('#contourAnimationResolutionSelect').val(leafletMap["TrendingData"].getZoom())
+            });
         }
 
         var timeoutVal;
         leafletMap[currentTab].off('boxzoomend');
         leafletMap[currentTab].on('boxzoomend', function (event) {
-            $('#siteList').multiselect("uncheckAll");
+            meterList.unselectAll()
+            $('#theMap' + currentTab).find('.leafletCircle').addClass('circleButtonBlack');
 
-            $.each(locationdata.Locations, function (index, data) {
+            $.each(locationdata.JSON, function (index, data) {
                 if (data.Latitude >= event.boxZoomBounds._southWest.lat && data.Latitude <= event.boxZoomBounds._northEast.lat
                     && data.Longitude >= event.boxZoomBounds._southWest.lng && data.Longitude <= event.boxZoomBounds._northEast.lng) {
-                    if ($('#siteList').multiselect("option").multiple) {
+                    
+                    $.each(meterList.list, function (_, item) {
+                        if (item.ID == data.ID) {
+                            item.Selected = true;
+                        }
 
-                        $('#siteList').multiselect("widget").find(":checkbox").each(function () {
-                            if (this.value == data.id) {
-                                this.click();
-                            }
-
-                        });
-                    } else {
-                        $('#siteList').multiselect("widget").find(":radio[value='" + data.id + "']").each(function () { this.click(); });
-                        $('#siteList').multiselect('refresh');
-                    }
-
+                    });
+                    
+                    $('#theMap' + currentTab).find('.leafletCircle').children('[id*=' + data.Name.replace(/[^A-Za-z0-9]/g, '') + ']').parent().removeClass('circleButtonBlack')
                 }
             });
+
+            if ($('#deviceFilterList').val() != 'ClickEvent') {
+                cache_Meter_Filter = $('#deviceFilterList').val();
+                $('#deviceFilterList').append(new Option('Click Event', 'ClickEvent'));
+                $('#deviceFilterList').val('ClickEvent');
+            }
+
+            $('#meterSelected').text(meterList.selectedCount());
 
             clearTimeout(timeoutVal);
             timeoutVal = setTimeout(function () {
@@ -2813,98 +2668,125 @@ function plotContourMapLocations(locationdata, newTab, thedatefrom, thedateto, f
         });
 
 
-    }
+    //}
     showSiteSet($('#selectSiteSet' + currentTab)[0]);
-    plotContourMap(locationdata, thedatefrom, thedateto);
+    plotMapPoints(locationdata, thedatefrom, thedateto);
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
-function getLeafletLocationColors(dataPoint) {
+function getColorsForTab(dataPoint, colors) {
     var color = '#000000';
 
     if (currentTab === "TrendingData") {
         color = 'rgb(0,255,0)'; // green
         if (dataPoint[$('#trendingDataTypeSelection').val()] === null) color = '#000000'  // black  
-        //else if (dataPoint[$('#trendingDataTypeSelection').val()] < 0.8) color = '#996633';  //dark brown
-        //else if (dataPoint[$('#trendingDataTypeSelection').val()] > 1.2) color = '#ff0000';       //bright red 
     }
-    else if (currentTab === "Correctness" || currentTab === "Completeness") {
-        var percentage = (dataPoint.data[1] / (dataPoint.data[1] + dataPoint.data[2] + dataPoint.data[3] + dataPoint.data[4]) * 100).toFixed(2);
+    else if (currentTab === "Correctness") {
+        var percentage = (parseFloat(dataPoint.GoodPoints) / (parseFloat(dataPoint.GoodPoints) + parseFloat(dataPoint.LatchedPoints) + parseFloat(dataPoint.UnreasonablePoints) + parseFloat(dataPoint.NoncongruentPoints)) * 100).toFixed(2);
+        if (colors == undefined || dataPoint.Count == 0) color = '#0000FF';
+        else if (percentage > 100) color = colors["> 100%"];
+        else if (percentage <= 100 && percentage >= 98) color = colors["98% - 100%"];
+        else if (percentage < 98 && percentage >= 90) color = colors["90% - 97%"];
+        else if (percentage < 90 && percentage >= 70) color = colors["70% - 89%"];
+        else if (percentage < 70 && percentage >= 50) color = colors["50% - 69%"];
+        else if (percentage < 50 && percentage > 0) color = colors[">0% - 49%"];
+        else if (percentage < 0) color = colors["0%"];    
+        else color = '#0000FF';
+    }
+    else if (currentTab == "Completeness") {
+        var percentage = ((parseFloat(dataPoint.GoodPoints) + parseFloat(dataPoint.LatchedPoints) + parseFloat(dataPoint.UnreasonablePoints) + parseFloat(dataPoint.NoncongruentPoints)) / parseFloat(dataPoint.ExpectedPoints) * 100).toFixed(2);
 
-        if (dataPoint.data[0] == 0 && dataPoint.data[1] == 0 && dataPoint.data[2] == 0 && dataPoint.data[3] == 0 && dataPoint.data[4] == 0 && dataPoint.data[5] == 0) {
-            color = ['#0000FF'];
+        if (colors == undefined || dataPoint.Count == 0) {
+            color = '#0000FF';
         } else if (percentage > 100) {
-            color = [globalcolorsDQ[6]];
+            color = colors["> 100%"];
         } else if (percentage <= 100 && percentage >= 98) {
-            color = [globalcolorsDQ[5]];
+            color = colors["98% - 100%"];
         } else if (percentage < 98 && percentage >= 90) {
-            color = [globalcolorsDQ[4]];
+            color = colors["90% - 97%"];
         } else if (percentage < 90 && percentage >= 70) {
-            color = [globalcolorsDQ[3]];
+            color = colors["70% - 89%"];
         } else if (percentage < 70 && percentage >= 50) {
-            color = [globalcolorsDQ[2]];
+            color = colors["50% - 69%"];
         } else if (percentage < 50 && percentage > 0) {
-            color = [globalcolorsDQ[1]];
-        } else {
-            color = [globalcolorsDQ[0]];
+            color = colors[">0% - 49%"];
+        } else if(percentage < 0){
+            color = colors["0%"];
         }
+        else
+            color = '#0000FF';
+
     }
     else if (currentTab === "Breakers") {
-        if (dataPoint.data[0] === 0 && dataPoint.data[1] == 0 && dataPoint.data[2] == 0) {
+        if (colors == undefined) color = '#0000FF';
+        else if (dataPoint["No Operation"] > 0)
+            color = colors["No Operation"];
+        else if (dataPoint["Normal"] > 0)
+            color = colors["Normal"];
+        else if (dataPoint["Late"] > 0)
+            color = colors["Late"];
+        else if (dataPoint["Indeterminate"] > 0)
+            color = colors["Indeterminate"];
+        else
             color = '#0E892C';
-        } else {
-            color = '#CC3300';
-        }
+
 
     }
     else if (currentTab === "Trending") {
-        if (dataPoint.data[0] === 0 && dataPoint.data[1] === 0) {
+        if (colors == undefined || dataPoint.AlarmCount == 0)
             color = '#0E892C';
-        } else if(dataPoint.data[0] > 0){
-            color = '#FF0000';
-        } else if (dataPoint.data[1] > 0) {
-            color = '#000000'
-        }
+        else if(dataPoint.Alarm > 0)
+            color = colors['Alarm'];
+        else 
+            color = colors['Offnormal']
     }
 
     else if (currentTab === "Faults") {
-            if (dataPoint.status === 0) 
-                color = '#0E892C';
-            else 
-                color = '#CC3300';
+        if (colors == undefined || dataPoint.Count == 0)
+            color = '#0E892C';
+        else 
+            color = '#CC3300';
     }
     else if (currentTab === "Disturbances") {
-        if (dataPoint.data[0] == 0 && dataPoint.data[1] == 0 && dataPoint.data[2] == 0 && dataPoint.data[3] == 0 && dataPoint.data[4] == 0 && dataPoint.data[5] == 0)
+
+        if (colors == undefined || dataPoint.Count == 0)
             color = '#0E892C';
-        else if (dataPoint.data[5] > 0)
-            color = globalcolorsEvents[5];
-        else if (dataPoint.data[4] > 0)
-            color = globalcolorsEvents[4];
-        else if (dataPoint.data[3] > 0)
-            color = globalcolorsEvents[3];
-        else if (dataPoint.data[2] > 0)
-            color = globalcolorsEvents[2];
-        else if (dataPoint.data[1] > 0)
-            color = globalcolorsEvents[1];
-        else if (dataPoint.data[0] > 0)
-            color = globalcolorsEvents[0];
+        else if (dataPoint["5"] > 0)
+            color = colors["5"];
+        else if (dataPoint["4"] > 0)
+            color = colors["4"];
+        else if (dataPoint["3"] > 0)
+            color = colors["3"];
+        else if (dataPoint["2"] > 0)
+            color = colors["2"];
+        else if (dataPoint["1"] > 0)
+            color = colors["1"];
+        else if (dataPoint["0"] > 0)
+            color = colors["0"];
     }
     else if (currentTab === "Events") {
-        if (dataPoint.data[0] == 0 && dataPoint.data[1] == 0 && dataPoint.data[2] == 0 && dataPoint.data[3] == 0 && dataPoint.data[4] == 0 && dataPoint.data[5] == 0)
+        if (colors == undefined || dataPoint.Count == 0)
             color = '#0E892C';
-        else if (dataPoint.data[0] > 0)
-            color = globalcolorsEvents[5];
-        else if (dataPoint.data[1] > 0)
-            color = globalcolorsEvents[4];
-        else if (dataPoint.data[2] > 0)
-            color = globalcolorsEvents[3];
-        else if (dataPoint.data[3] > 0)
-            color = globalcolorsEvents[2];
-        else if (dataPoint.data[4] > 0)
-            color = globalcolorsEvents[1];
-        else if (dataPoint.data[5] > 0)
-            color = globalcolorsEvents[0];
+        else if (dataPoint.Fault > 0)
+            color = colors["Fault"];
+        else if (dataPoint.Interruption > 0)
+            color = colors["Interruption"];
+        else if (dataPoint.Sag > 0)
+            color = colors["Sag"];
+        else if (dataPoint.Swell > 0)
+            color = colors["Swell"];
+        else if (dataPoint.Other > 0)
+            color = colors["Other"];
+        else 
+            color = '#0E892C';
     }
+    else if (currentTab === "Extensions") {
+        if (colors == undefined || dataPoint.Count == 0)
+            color = '#0E892C';
+        else
+            color = '#CC3300';
+    }
+
     return color;
 
 }
@@ -2912,92 +2794,20 @@ function getLeafletLocationColors(dataPoint) {
 //////////////////////////////////////////////////////////////////////////////////////////////////
 function getLeafletLocationPopup(dataPoint) {
     var popup;
-    if (currentTab === "TrendingData") {
-        popup = "<table><tr><td>Site:&nbsp;</td><td style='text-align: right'>&nbsp;" + dataPoint.name + "&nbsp;</td></tr>";
-        popup += "<tr><td>Average:&nbsp;</td><td style='text-align: right'>&nbsp;" + parseFloat(dataPoint.Average).toFixed(2) + "&nbsp;</td></tr>";
-        popup += "<tr><td>Minimum:&nbsp;</td><td style='text-align: right'>&nbsp;" + parseFloat(dataPoint.Minimum).toFixed(2) + "&nbsp;</td></tr>";
-        popup += "<tr><td>Maximum:&nbsp;</td><td style='text-align: right'>&nbsp;" + parseFloat(dataPoint.Maximum).toFixed(2) + "&nbsp;</td></tr>";
-        popup += "</table>";
+    popup = "<table><tr><td>Site:&nbsp;</td><td style='text-align: right'>&nbsp;" + dataPoint.Name + "&nbsp;</td></tr>";
+    $.each(Object.keys(dataPoint), function (i, key) {
+        if (key != "ID" && key != "Name" && key != "Longitude" && key != "Latitude" && key != "Data" && dataPoint[key] != null )
+            popup += "<tr><td>"+ key +":&nbsp;</td><td style='text-align: right'>&nbsp;" + ( dataPoint[key].toString().indexOf('.') < 0 ? dataPoint[key] : dataPoint[key].toFixed(4)) + "&nbsp;</td></tr>";
+    });
+    popup += "</table>";
 
-    }
-    else if (currentTab === "Completeness") {
-        var completepoints = dataPoint.data[1] + dataPoint.data[2] + dataPoint.data[3] + dataPoint.data[4];
-        var recieved = (completepoints / dataPoint.data[0] * 100).toFixed(2);
-        var duplicate = (dataPoint.data[5] / dataPoint.data[0] * 100).toFixed(2);
-
-        popup = "<table><tr><td>Site:&nbsp;</td><td style='text-align: right'>&nbsp;" + dataPoint.name + "&nbsp;</td></tr>";
-        popup += "<tr><td>Expected:&nbsp;</td><td style='text-align: right'>&nbsp;" + dataPoint.data[0] + "&nbsp;</td></tr>";
-        popup += "<tr><td>Recieved:&nbsp;</td><td style='text-align: right'>&nbsp;" + recieved + "&nbsp;</td></tr>";
-        popup += "<tr><td>Duplicate:&nbsp;</td><td style='text-align: right'>&nbsp;" + duplicate + "&nbsp;</td></tr>";
-        popup += "</table>";
-
-    }
-    else if (currentTab === "Correctness") {
-        var percentage = (dataPoint.data[1] / (dataPoint.data[1] + dataPoint.data[2] + dataPoint.data[3] + dataPoint.data[4]) * 100).toFixed(2);
-
-        var val1 = (dataPoint.data[2] / (dataPoint.data[1] + dataPoint.data[2] + dataPoint.data[3] + dataPoint.data[4]) * 100).toFixed(2);
-        var val2 = (dataPoint.data[3] / (dataPoint.data[1] + dataPoint.data[2] + dataPoint.data[3] + dataPoint.data[4]) * 100).toFixed(2);
-        var val3 = (dataPoint.data[4] / (dataPoint.data[1] + dataPoint.data[2] + dataPoint.data[3] + dataPoint.data[4]) * 100).toFixed(2);
-        popup = "<table><tr><td>Site:&nbsp;</td><td style='text-align: right'>&nbsp;" + dataPoint.name + "&nbsp;</td></tr>";
-        if (dataPoint.data[0] == 0 && dataPoint.data[1] == 0 && dataPoint.data[2] == 0 && dataPoint.data[3] == 0 && dataPoint.data[4] == 0 && dataPoint.data[5] == 0) {
-            popup += "<tr><td>No Data Available</td></tr>";
-        } else {
-
-            popup += "<tr><td>Latched:&nbsp;</td><td style='text-align: right'>&nbsp;" + parseFloat(val1).toFixed(2) + "&nbsp;</td></tr>";
-            popup += "<tr><td>Unreasonable:&nbsp;</td><td style='text-align: right'>&nbsp;" + parseFloat(val2).toFixed(2) + "&nbsp;</td></tr>";
-            popup += "<tr><td>Non-Congruent:&nbsp;</td><td style='text-align: right'>&nbsp;" + parseFloat(val3).toFixed(2) + "&nbsp;</td></tr>";
-            popup += "</table>";
-        }
-    }
-    else if (currentTab === "Breakers") {
-        popup = "<table><tr><td>Site:&nbsp;</td><td style='text-align: right'>&nbsp;" + dataPoint.name + "&nbsp;</td></tr>";
-        popup += "<tr><td>Normal:&nbsp;</td><td style='text-align: right'>&nbsp;" + dataPoint.data[0] + "&nbsp;</td></tr>";
-        popup += "<tr><td>Late:&nbsp;</td><td style='text-align: right'>&nbsp;" + dataPoint.data[1] + "&nbsp;</td></tr>";
-        popup += "<tr><td>Indeterminate:&nbsp;</td><td style='text-align: right'>&nbsp;" + dataPoint.data[2] + "&nbsp;</td></tr>";
-        popup += "</table>";
-
-    }
-    else if (currentTab === "Faults") {
-        popup = "<table><tr><td>Site:&nbsp;</td><td style='text-align: right'>&nbsp;" + dataPoint.name + "&nbsp;</td></tr>";
-        popup += "<tr><td>Faults:&nbsp;</td><td style='text-align: right'>&nbsp;" + dataPoint.status + "&nbsp;</td></tr>";
-        popup += "</table>";
-
-    }
-    else if (currentTab === "Disturbances") {
-        popup = "<table><tr><td>Site:&nbsp;</td><td style='text-align: right'>&nbsp;" + dataPoint.name + "&nbsp;</td></tr>";
-        popup += "<tr><td>5:&nbsp;</td><td style='text-align: right'>&nbsp;" + dataPoint.data[5] + "&nbsp;</td></tr>";
-        popup += "<tr><td>4:&nbsp;</td><td style='text-align: right'>&nbsp;" + dataPoint.data[4] + "&nbsp;</td></tr>";
-        popup += "<tr><td>3:&nbsp;</td><td style='text-align: right'>&nbsp;" + dataPoint.data[3] + "&nbsp;</td></tr>";
-        popup += "<tr><td>2:&nbsp;</td><td style='text-align: right'>&nbsp;" + dataPoint.data[2] + "&nbsp;</td></tr>";
-        popup += "<tr><td>1:&nbsp;</td><td style='text-align: right'>&nbsp;" + dataPoint.data[1] + "&nbsp;</td></tr>";
-        popup += "<tr><td>0:&nbsp;</td><td style='text-align: right'>&nbsp;" + dataPoint.data[0] + "&nbsp;</td></tr>";
-        popup += "</table>";
-
-    }
-    else if (currentTab === "Events") {
-        popup = "<table><tr><td>Site:&nbsp;</td><td style='text-align: right'>&nbsp;" + dataPoint.name + "&nbsp;</td></tr>";
-        popup += "<tr><td>Interruption:&nbsp;</td><td style='text-align: right'>&nbsp;" + dataPoint.data[0] + "&nbsp;</td></tr>";
-        popup += "<tr><td>Fault:&nbsp;</td><td style='text-align: right'>&nbsp;" + dataPoint.data[1] + "&nbsp;</td></tr>";
-        popup += "<tr><td>Sag:&nbsp;</td><td style='text-align: right'>&nbsp;" + dataPoint.data[2] + "&nbsp;</td></tr>";
-        popup += "<tr><td>Transient:&nbsp;</td><td style='text-align: right'>&nbsp;" + dataPoint.data[3] + "&nbsp;</td></tr>";
-        popup += "<tr><td>Swell:&nbsp;</td><td style='text-align: right'>&nbsp;" + dataPoint.data[4] + "&nbsp;</td></tr>";
-        popup += "<tr><td>Other:&nbsp;</td><td style='text-align: right'>&nbsp;" + dataPoint.data[5] + "&nbsp;</td></tr>";
-        popup += "</table>";
-
-    }
-    else if (currentTab === "Trending") {
-            popup = "<table><tr><td>Site:&nbsp;</td><td style='text-align: right'>&nbsp;" + dataPoint.name + "&nbsp;</td></tr>";
-            popup += "<tr><td>Normal:&nbsp;</td><td style='text-align: right'>&nbsp;" + dataPoint.data[0] + "&nbsp;</td></tr>";
-            popup += "<tr><td>OffNormal:&nbsp;</td><td style='text-align: right'>&nbsp;" + dataPoint.data[1] + "&nbsp;</td></tr>";
-            popup += "</table>";
-
-        }
     return popup;
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
-function plotContourMap(data, thedatefrom, thedateto) {
+function plotMapPoints(data, thedatefrom, thedateto) {
     $('.contourControl').hide();
+    var thedatasent;
 
     if (currentTab === "TrendingData") {
 
@@ -3011,7 +2821,8 @@ function plotContourMap(data, thedatefrom, thedateto) {
                     EndDate: thedateto,
                     DataType: $('#trendingDataTypeSelection').val(),
                     ColorScaleName: $('#contourColorScaleSelect').val(),
-                    UserName: postedUserName
+                    UserName: postedUserName,
+                    MeterIds: 0
                 }
             };
 
@@ -3059,37 +2870,12 @@ function plotContourMap(data, thedatefrom, thedateto) {
         $('#innerLegend').append('<div class="row"><i style="background: #CC3300"></i> Faults</div>');
         $('#innerLegend').append('<div class="row"><i style="background: #0E892C"></i> No Faults</div>');
     }
-    else if (currentTab === "Trending") {
-        $('#innerLegend').append('<div class="row"><i style="background: #FF0000"></i> Normal</div>');
-        $('#innerLegend').append('<div class="row"><i style="background: #000000"></i> OffNormal</div>');
-        LoadHeatmapLeaflet(data);
-
-    }
-
-    else if (currentTab === "Disturbances") {
-        for (var i = globalcolorsEvents.length - 1, j= 0; i >= 0; --i, ++j)
-            $('#innerLegend').append('<div class="row"><i style="background: ' + globalcolorsEvents[i] + '"></i> ' + i + '</div>');
-        LoadHeatmapLeaflet(data);
-    }
-    else if (currentTab === "Events") {
-        var strings = ['Other', 'Swell', 'Transient', 'Sag', 'Fault', 'Interruption'];
-        for (var i = globalcolorsEvents.length - 1; i >= 0; --i)
-            $('#innerLegend').append('<div class="row"><i style="background: ' + globalcolorsEvents[i] + '"></i> ' +strings[i] + '</div>');
-        LoadHeatmapLeaflet(data);
-    }
     else {
-        for (var i = data.ColorDomain.length - 1; i >= 0; --i) {
-            if (i === data.ColorDomain.length - 1) {
-                $('#innerLegend').append('<div class="row"><i style="background: #' + data.ColorRange[i].toString(16).slice(2) + '"></i> >' + data.ColorDomain[i] + '</div>');
-            }
-            if (i == 0) {
-                $('#innerLegend').append('<div class="row"><i style="background: #' + data.ColorRange[i].toString(16).slice(2) + '"></i> <' + data.ColorDomain[i] + '</div>');
-            }
-            else if (i % 2 === 0) {
-                $('#innerLegend').append('<div class="row"><i style="background: #' + data.ColorRange[i-1].toString(16).slice(2) + '"></i> ' + data.ColorDomain[i-1] + '&ndash;' + data.ColorDomain[i] + '</div>');
-            }
-        }
-
+        $.each(Object.keys(data.Colors), function(i, key){
+            $('#innerLegend').append('<div class="row"><i style="background: ' + data.Colors[key]+ '"></i> ' + key + '</div>');
+        });
+        $('#innerLegend').append('<div class="row"><i style="background: #0E892C"></i>None</div>');
+        LoadHeatmapLeaflet(data);
     }
 
     legend.getContainer().addEventListener('mouseover', function () {
@@ -3115,19 +2901,52 @@ function plotContourMap(data, thedatefrom, thedateto) {
 
 //////////////////////////////////////////////////////////////////////////////////////////////
 
+function showHeatmap(thecontrol) {
+    if ($(thecontrol).val() == "MinimumSags" || $(thecontrol).val() == "MaximumSwell") {
+        dataHub.getLocationsHeatmap(contextfromdate, contexttodate, meterList.selectedIdsString(), $(thecontrol).val()).done(function (data) {
+            data.JSON = JSON.parse(data.Data);
+            LoadHeatmapLeaflet(data);
+        });
+    }
+    else {
+        if(cache_Map_Matrix_Data != null)
+            LoadHeatmapLeaflet(cache_Map_Matrix_Data);
+        else {
+            if (currentTab != "TrendingData") {
+                dataHub.getMeterLocations(contextfromdate, contexttodate, meterList.selectedIdsString(), currentTab, userId).done(function (data) {
+                    data.JSON = JSON.parse(data.Data);
+                    LoadHeatmapLeaflet(data);
+                });
+            }
+            else {
+
+            }
+        }
+    }
+
+}
+
 function LoadHeatmapLeaflet(thedata) {
+    var GLOBE_WIDTH = 256; // a constant in Google's map projection
+    var west = (markerGroup.getBounds()._southWest != undefined? markerGroup.getBounds()._southWest.lng: 84.3880);
+    var east = (markerGroup.getBounds()._northEast != undefined ? markerGroup.getBounds()._northEast.lng : 84.3880);
+    var angle = east - west;
+    if (angle < 0) {
+        angle += 360;
+    }
+
+    var zoom = Math.round(Math.log(($('#theMap' + currentTab).width() < 500 ? 500 : $('#theMap' + currentTab).width()) * 360 / angle / GLOBE_WIDTH) / Math.LN2);
     var cfg = {
         // radius should be small ONLY if scaleRadius is true (or small radius is intended)
         // if scaleRadius is false it will be the constant radius used in pixels
-        "radius": 1,
-        "scaleRadius": false,
+        "radius": 50 / Math.pow(2, (zoom > 13 ? 13 : zoom )),
         "maxOpacity": .5,
         // scales the radius based on map zoom
         "scaleRadius": true,
         // if set to false the heatmap uses the global maximum for colorization
         // if activated: uses the data maximum within the current map boundaries 
         //   (there will always be a red spot with useLocalExtremas true)
-        "useLocalExtrema": false,
+        "useLocalExtrema": true,
         // which field name in your data represents the latitude - default "lat"
         latField: 'Latitude',
         // which field name in your data represents the longitude - default "lng"
@@ -3137,130 +2956,118 @@ function LoadHeatmapLeaflet(thedata) {
     };
 
     $(leafletMap[currentTab].getPanes().overlayPane).children().remove();
-    var testData = { data: thedata.Locations.filter(function (currentValue, index, array) { return currentValue.status > 0;}), min: 1, max: 100 };
+    var testData = { data: thedata.JSON.filter(function (currentValue, index, array) { return currentValue.Count > 0; }), min: 1, max: 100 };
     var heatmapLayer = new HeatmapOverlay(cfg);
     var heatmap = L.layerGroup().addLayer(heatmapLayer).addTo(leafletMap[currentTab]);
     heatmapLayer.setData(testData);
     L.control.layers().addOverlay(heatmap, "Heatmap layer");
 }
 
+function ManageLocationClick(siteID) {
+    var thedatefrom;
+    var thedateto;
 
-function highlightDaysInCalendar(date) {
-    var i = -1;
+    if (globalContext == "custom") {
+        thedatefrom = moment($('#dateRange').data('daterangepicker').startDate._d.toISOString()).utc().format('YYYY-MM-DD') + "T00:00:00Z";
+        thedateto = moment($('#dateRange').data('daterangepicker').endDate._d.toISOString()).utc().format('YYYY-MM-DD') + "T00:00:00Z";
+    }
+    else if (globalContext == "day") {
+        thedatefrom = moment(contextfromdate).utc().startOf('day').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+        thedateto = moment(contextfromdate).utc().endOf('day').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+    }
+    else if (globalContext == "hour") {
+        thedatefrom = moment(contextfromdate).utc().startOf('hour').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+        thedateto = moment(contextfromdate).utc().endOf('hour').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+    }
+    else if (globalContext == "minute") {
+        thedatefrom = moment(contextfromdate).utc().startOf('minute').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+        thedateto = moment(contextfromdate).utc().endOf('minute').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+    }
+    else if (globalContext == "second") {
+        thedatefrom = moment(contextfromdate).utc().startOf('second').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+        thedateto = moment(contextfromdate).utc().endOf('second').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+    }
+    else {
+        thedatefrom = moment(contextfromdate).utc();
+        thedateto = moment(contextfromdate).utc();
+    }
 
-    //if ((i = $.inArray(date.toString().substr(0, 16), calendardatesEvents)) > -1) {
-
-        switch ( currentTab ) {
-        
-            case "Events":
-                if ((i = $.inArray(date.toString().substr(0, 16), calendardatesEvents)) > -1) {
-                    return [true, 'highlight', calendartipsEvents[i]];
-                }
-
-                break;
-
-            case "Faults":
-                if ((i = $.inArray(date.toString().substr(0, 16), calendardatesEvents)) > -1) {
-                    if (calendartipsEvents[i].indexOf("Fault") > -1) {
-                        return [true, 'highlight', calendartipsEvents[i]];
-                    }
-                }
-                break;
-
-            case "Trending":
-                if ((i = $.inArray(date.toString().substr(0, 16), calendardatesTrending)) > -1) {
-                    return [true, 'highlight', calendartipsTrending[i]];
-                }
-                break;
-
-            case "Breakers":
-                if ((i = $.inArray(date.toString().substr(0, 16), calendardatesBreakers)) > -1) {
-                    return [true, 'highlight', calendartipsBreakers[i]];
-                }
-                break;
-        }
-    
-    return [true, ''];
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////////
-
-function ManageLocationClick(siteName, siteID) {
-
-    var thedatefrom = $.datepicker.formatDate("mm/dd/yy", $('#datePickerFrom').datepicker('getDate'));
-    var thedateto = $.datepicker.formatDate("mm/dd/yy", $('#datePickerTo').datepicker('getDate'));
+    var tabsForDigIn = ['Events', 'Disturbances', 'Faults', 'Breakers', 'Extensions'];
 
     if ((thedatefrom == "") || (thedateto == "")) return;
 
-    switch (currentTab) {
-        case "Events":
-            populateDivWithBarChart('getEventsForPeriod', 'Overview' + currentTab, siteName, siteID, thedatefrom, thedateto);
-           
-            break;
-
-        case "Disturbances":
-            populateDivWithBarChart('getDisturbancesForPeriod', 'Overview' + currentTab, siteName, siteID, thedatefrom, thedateto);
-
-            break;
-
-        case "Faults":
-            populateDivWithBarChart('getFaultsForPeriod', 'Overview' + currentTab, siteName, siteID, thedatefrom, thedateto);
-            
-            break;
-
-        case "Trending":
-            populateDivWithBarChart('getTrendingForPeriod', 'Overview' + currentTab, siteName, siteID, thedatefrom, thedateto);
-
-            break;
-
-        case "TrendingData":
-            populateDivWithErrorBarChart('getTrendingDataForPeriod', 'Overview' + currentTab, siteName, siteID, thedatefrom, thedateto);
-
-            break;
-        case "Breakers":
-            populateDivWithBarChart('getBreakersForPeriod', 'Overview' + currentTab, siteName, siteID, thedatefrom, thedateto);
-
-            break;
-
-        case "Completeness":
-            populateDivWithBarChart('getCompletenessForPeriod', 'Overview' + currentTab, siteName, siteID, thedatefrom, thedateto);
-
-            break;
-
-        case "Correctness":
-            populateDivWithBarChart('getCorrectnessForPeriod', 'Overview' + currentTab, siteName, siteID, thedatefrom, thedateto);
-
-            break;
-
-        default:
-            break;
+    if (currentTab == "TrendingData")
+        populateDivWithErrorBarChart('getTrendingDataForPeriod', 'Overview' + currentTab, siteID, thedatefrom, thedateto);
+    else
+    {
+        populateDivWithBarChart('Overview' + currentTab, siteID, thedatefrom, thedateto);
     }
+
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////
 
 function manageTabsByDate(theNewTab, thedatefrom, thedateto) {
 
+    var eventDataTabs = ["Events", "Disturbances", "Faults", "Breakers", 'Extensions'];
+
     if ((thedatefrom == "") || (thedateto == "")) return;
 
+    if (eventDataTabs.indexOf(theNewTab) < 0 && globalContext != "custom" && globalContext != "day")
+        globalContext = "day";
+
     currentTab = theNewTab;
+    var barChartStartDate = thedatefrom, tableDate = thedatefrom;
 
-    reflowContents(theNewTab);
+    setMapHeaderDate(thedatefrom, thedateto);
+    if (globalContext == "second") {
+        var thing = thedatefrom.split('');
+        thing.splice(thedatefrom.length - 3, 2, '0', '0');
+        barChartStartDate = thing.join('');
+    }
     
-    selectsitesincharts();
 
+    if (eventDataTabs.indexOf(currentTab) < 0) {
+        barChartStartDate = thedatefrom = moment($('#dateRange').data('daterangepicker').startDate._d.toISOString()).utc().format('YYYY-MM-DD') + "T00:00:00Z";
+        thedateto = moment($('#dateRange').data('daterangepicker').endDate._d.toISOString()).utc().format('YYYY-MM-DD') + "T00:00:00Z";
+    }
+    resizeMapAndMatrix(theNewTab);
+
+    if (globalContext != "custom")
+        getTableDivData('getDetailsForSites' + currentTab, 'Detail' + currentTab, meterList.selectedIdsString(), tableDate);
+    else {
+        if ($('#Detail' + currentTab + 'Table').children().length > 0) {
+            var parent = $('#Detail' + currentTab + 'Table').parent();
+            $('#Detail' + currentTab + 'Table').remove();
+            $(parent).append('<div id="Detail' + currentTab + 'Table"></div>');
+        }
+
+    }
+
+    if(currentTab != "TrendingData")
+        populateDivWithBarChart('Overview' + currentTab, meterList.selectedIdsString(), barChartStartDate, thedateto);
+    else
+        populateDivWithErrorBarChart('getTrendingDataForPeriod', 'Overview' + currentTab, meterList.selectedIdsString(), thedatefrom, thedateto)
     getLocationsAndPopulateMapAndMatrix(theNewTab, thedatefrom, thedateto, "undefined");
 }
 
 function manageTabsByDateForClicks(theNewTab, thedatefrom, thedateto, filter) {
-
     if ((thedatefrom == "") || (thedateto == "")) return;
+    var tabsForDigIn = ['Events', 'Disturbances', 'Faults', 'Breakers', 'Extensions'];
+    
+    if (tabsForDigIn.indexOf(theNewTab) >= 0 || globalContext == "custom")
+        setGlobalContext(true);
 
     currentTab = theNewTab;
+    var barChartStartDate = thedatefrom;
 
-    reflowContents(theNewTab);
+    setMapHeaderDate(thedatefrom, thedateto);
 
+    getTableDivData('getDetailsForSites' + currentTab, 'Detail' + currentTab, meterList.selectedIdsString(), thedatefrom);
+    if(tabsForDigIn.indexOf(currentTab) >= 0 && globalContext != 'second')
+        populateDivWithBarChart('Overview' + currentTab, meterList.selectedIdsString(), thedatefrom, thedateto);
     getLocationsAndPopulateMapAndMatrix(theNewTab, thedatefrom, thedateto, filter);
+
 }
 
 
@@ -3272,69 +3079,82 @@ function reflowContents(newTab) {
 
 //////////////////////////////////////////////////////////////////////////////////////////////
 
-function resizeDocklet( theparent , chartheight ) {
+function resizeDocklet(theparent, chartheight) {
+    var thedatefrom;
+    var thedateto;
+    var barDateFrom;
+    var barDateTo;
+    var tabsForDigIn = ['Events', 'Disturbances', 'Faults', 'Breakers', 'Extensions'];
 
-    var thedatefrom = $.datepicker.formatDate("mm/dd/yy", $('#datePickerFrom').datepicker('getDate'));
-    var thedateto = $.datepicker.formatDate("mm/dd/yy", $('#datePickerTo').datepicker('getDate'));
-    var selectedIDs = GetCurrentlySelectedSites();
 
-    var siteName = selectedIDs.length + " of " + $('#siteList')[0].length + " selected";
+    if (globalContext == "custom") {
+        barDateFrom = thedatefrom = moment($('#dateRange').data('daterangepicker').startDate._d.toISOString()).utc().format('YYYY-MM-DD') + "T00:00:00Z";
+        barDateTo = thedateto = moment($('#dateRange').data('daterangepicker').endDate._d.toISOString()).utc().format('YYYY-MM-DD') + "T00:00:00Z";
+    }
+    else if (tabsForDigIn.indexOf(currentTab) >= 0 && globalContext == "day") {
+        barDateFrom = thedatefrom = moment(contextfromdate).utc().startOf('day').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+        barDateTo = thedateto = moment(contextfromdate).utc().endOf('day').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+    }
+    else if (tabsForDigIn.indexOf(currentTab) >= 0 && globalContext == "hour") {
+        barDateFrom = thedatefrom = moment(contextfromdate).utc().startOf('hour').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+        barDateTo = thedateto = moment(contextfromdate).utc().endOf('hour').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+    }
+    else if (tabsForDigIn.indexOf(currentTab) >= 0 && globalContext == "minute") {
+        barDateFrom = thedatefrom = moment(contextfromdate).utc().startOf('minute').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+        barDateTo = thedateto = moment(contextfromdate).utc().endOf('minute').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+    }
+    else if (tabsForDigIn.indexOf(currentTab) >= 0 && globalContext == "second") {
+        thedatefrom = moment(contextfromdate).utc().startOf('second').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+        thedateto = moment(contextfromdate).utc().endOf('second').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+        barDateFrom = moment(contextfromdate).utc().startOf('minute').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+        barDateTo = moment(contextfromdate).utc().endOf('minute').format('YYYY-MM-DDTHH:mm:ss') + "Z";
+
+    }
+    else {
+        barDateFrom = thedatefrom = moment($('#dateRange').data('daterangepicker').startDate._d.toISOString()).utc().format('YYYY-MM-DD') + "T00:00:00Z";
+        barDateTo = thedateto = moment($('#dateRange').data('daterangepicker').endDate._d.toISOString()).utc().format('YYYY-MM-DD') + "T00:00:00Z";
+    }
+
+
+    var siteName = meterList.selectedCount() + " of " + meterList.count() + " selected";
 
     var siteID = "";
 
-    if (selectedIDs.length > 0) {
+    if (meterList.selectedCount() > 0) {
 
-        var thedetails = selectedIDs[0].split('|');
+        var thedetails = meterList.selected()[0].split('|');
 
-        if (selectedIDs.length == 1) {
+        if (meterList.selectedCount() == 1) {
             siteName = thedetails[0];
         }
 
-        $.each(selectedIDs, function (key, value) {
+        $.each(meterList.selected(), function (key, value) {
             thedetails = value.split('|');
             siteID += thedetails[1] + ",";
         });
     }
 
-    var filterString = [];
-    var leg = d3.selectAll('.legend');
-
-    $.each(leg[0], function (i, d) {
-        if ($(d).children('rect').css('fill') === 'rgb(128, 128, 128)')
-            filterString.push($(d).children('text').text());
-    });
-
-
     theparent.css("height", chartheight);
 
     var firstChild = $("#" + theparent[0].firstElementChild.id);
 
-    firstChild.css("height", chartheight);
+    firstChild.css("height", chartheight - 100);
     if (currentTab === "TrendingData") {
         if ($('#Overview' + currentTab).children().length > 0 && cache_ErrorBar_Data !== null)
-            buildErrorBarChart(cache_ErrorBar_Data, 'Overview' + currentTab, siteName, siteID, thedatefrom, thedateto);
+            buildErrorBarChart(cache_ErrorBar_Data, 'Overview' + currentTab, siteID, thedatefrom, thedateto);
     }
     else {
         if ($('#Overview' + currentTab).children().length > 0 && cache_Graph_Data !== null)
-            buildBarChart(cache_Graph_Data, 'Overview' + currentTab, siteName, siteID, thedatefrom, thedateto);
+            buildBarChart(cache_Graph_Data, 'Overview' + currentTab, siteID, barDateFrom, barDateTo);
     }
 
-
-    //console.log($('#Detail' + currentTab + 'Table').children());
     if($('#Detail' + currentTab + 'Table').children().length > 0 && cache_Table_Data !== null)
-        window["populate" + currentTab + "DivWithGrid"](cache_Table_Data, filterString);
-
-        //window["populate" + currentTab + "DivWithGrid"](cache_Table_Data);
-    
+        window["populate" + currentTab + "DivWithGrid"](cache_Table_Data);    
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////
 
 function resizeMapAndMatrix(newTab) {
-
-    $("#datePickerFrom").datepicker("hide");
-    $("#datePickerTo").datepicker("hide");
-
     var columnheight = $(window).height() - $('#tabs-' + newTab).offset().top - 25;
 
     $('#tabs-ModbusData').css('height', $(window).height() - $('#tabs-' + currentTab).offset().top);
@@ -3352,13 +3172,23 @@ function resizeMapAndMatrix(newTab) {
         resizeDocklet($("#DockDetail" + newTab), chartheight);
     }
     if (leafletMap[currentTab] !== null) {
-        leafletMap[currentTab].invalidateSize(true);
+        var onResize = function () {
+            markerGroup = new L.featureGroup(mapMarkers[currentTab].map(function (a) { return a.marker; }));
+            if (markerGroup.getBounds().isValid())
+                leafletMap[currentTab].fitBounds(markerGroup.getBounds());
+        };
 
-        markerGroup = new L.featureGroup(mapMarkers[currentTab].map(function (a) { return a.marker; }));
-        if (markerGroup.getBounds().isValid())
-            leafletMap[currentTab].fitBounds(markerGroup.getBounds());
-        //leafletMap[currentTab].setMaxBounds(L.latLngBounds(L.latLng(-180, -200), L.latLng(180, 200)));
+        // Hack: If the map does need to resize, onResize must be called twice.
+        //       Otherwise, it only needs to be called once.
+        leafletMap[currentTab].on('resize', onResize);
+        try{
+            leafletMap[currentTab].invalidateSize(true);
+        }
+        catch(ex){
 
+        }
+        leafletMap[currentTab].off('resize', onResize);
+        onResize();
     }
     resizeMatrixCells(newTab);
 }
@@ -3368,12 +3198,12 @@ function resizeMapAndMatrix(newTab) {
 function resizeMatrixCells(newTab) {
     var h = $("#theMatrix" + newTab).height();
     var w = $("#MapMatrix" + newTab).width();
-    var r = $('#siteList')[0].length;
+    var r = meterList.count();
 
     if($('#selectSiteSet' + currentTab).val() === "SelectedSites" )
-        r = $('#siteList').val().length;
+        r = meterList.selectedCount();
     else if ($('#selectSiteSet' + currentTab).val() === "All") 
-        r = $('#siteList')[0].length;
+        r = meterList.count();
     else {
         r = 0;
         $.each($('.matrix'), function (i, element) {
@@ -3388,9 +3218,6 @@ function resizeMatrixCells(newTab) {
         var rows = Math.ceil(r / columns);
         $(".matrix").css("width", (w / columns) - 4);
         $(".matrix").css("height", (h / rows) - 2);
-        //$.each($(".sparkbox"), function (i, element) {
-        //    $(element).css('height', '30%');
-        //});
 
         if ($(".matrix").width() < 200) {
             $('.faultgridtitle').css("font-size", '10px');
@@ -3405,72 +3232,64 @@ function resizeMatrixCells(newTab) {
         $.event.trigger({ type: 'matrixResize', message: 'Matrix Resize', time: new Date() });
 
     }
-
+    if (cache_Sparkline_Data !== null) {
+          $.each(cache_Sparkline_Data.JSON, (function (key, value) {
+              populateGridMatrix(value, value.ID, value.Name, cache_Sparkline_Data.Colors);
+          }));
+    }
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////
 
 function initializeDatePickers(datafromdate , datatodate) {
 
-    $("#datePickerFrom").datepicker({
-        onSelect: function (dateText, inst) {
-            //$("#staticPeriod")[0].value = "Custom";
-        },
-        onChangeMonthYear: function (year, month, instance) {
+    dateRangeOptions.startDate = moment(datafromdate).utc();
+    dateRangeOptions.endDate = moment(datatodate).utc();
 
-            var d = instance.selectedDay;
-            // Set new Date(year, month, 0) for entire month
-            $(this).datepicker('setDate', new Date(year, month - 1, d));
-        },
+    $('#dateRange').daterangepicker(dateRangeOptions, function (start, end, label) {
+        $('#dateRangeSpan').html(start.format('MM/DD/YYYY') + ' - ' + end.format('MM/DD/YYYY'));
+        
+        // Move global context back to custom range
+        for (var i = 0; i < 5; ++i)
+            setGlobalContext(false);
 
-        numberOfMonths: 1,
-        showOtherMonths: true,
-        selectOtherMonths: true,
-        changeMonth: true,
-        changeYear: true,
-        autoSize: false,
-        beforeShowDay: highlightDaysInCalendar,
-        timeFormat: 'hh:mm:ss',
-        dateFormat: 'mm/dd/yy',
-        showButtonPanel: false,
-
-        onClose: function (selectedDate) {
-            $("#datePickerTo").datepicker("option", "minDate", selectedDate);
-            $("#datePickerTo").datepicker("option", "minDate", null);
-        }
+        loadDataForDate();
     });
 
-    $("#datePickerFrom").datepicker("setDate", new Date(datafromdate));
+    $('#dateRangeSpan').html(dateRangeOptions.startDate.format('MM/DD/YYYY') + ' - ' + dateRangeOptions.endDate.format('MM/DD/YYYY'));
 
-    $("#datePickerTo").datepicker({
-        onSelect: function (dateText, inst) {
-            //$("#staticPeriod")[0].value = "Custom";
-        },
-        onChangeMonthYear: function (year, month, instance) {
+}
 
-            var d = instance.selectedDay;
-            // Set new Date(year, month, 0) for entire month
+function moveDateBackward() {
+    var startDate = $('#dateRange').data('daterangepicker').startDate.clone().startOf('day');
+    var endDate = $('#dateRange').data('daterangepicker').endDate.clone().endOf('day');
+    var duration = moment.duration(endDate.diff(startDate));
 
-            $(this).datepicker('setDate', new Date(year, month - 1, d));
-        },
+    // Move global context back to custom range
+    for (var i = 0; i < 5; ++i)
+        setGlobalContext(false);
 
-        numberOfMonths: 1,
-        showOtherMonths: true,
-        selectOtherMonths: true,
-        changeMonth: true,
-        changeYear: true,
-        autoSize: true,
-        beforeShowDay: highlightDaysInCalendar,
-        timeFormat: 'hh:mm:ss',
-        dateFormat: 'mm/dd/yy',
-        showButtonPanel: false,
-        onClose: function (selectedDate) {
-            $("#datePickerFrom").datepicker("option", "maxDate", selectedDate);
-            $("#datePickerFrom").datepicker("option", "maxDate", null);
-        }
-    });
+    $('#dateRange').data('daterangepicker').setEndDate(startDate);
+    $('#dateRange').data('daterangepicker').setStartDate(startDate.subtract(duration.asDays() - 1, 'days'));
 
-    $("#datePickerTo").datepicker("setDate", new Date(datatodate));
+    $('#dateRangeSpan').html($('#dateRange').data('daterangepicker').startDate.format('MM/DD/YYYY') + ' - ' + $('#dateRange').data('daterangepicker').endDate.format('MM/DD/YYYY'));
+    loadDataForDate();
+}
+
+function moveDateForward() {
+    var startDate = $('#dateRange').data('daterangepicker').startDate.clone().startOf('day');
+    var endDate = $('#dateRange').data('daterangepicker').endDate.clone().endOf('day');
+    var duration = moment.duration(endDate.diff(startDate));
+
+    // Move global context back to custom range
+    for (var i = 0; i < 5; ++i)
+        setGlobalContext(false);
+
+    $('#dateRange').data('daterangepicker').setStartDate(endDate);
+    $('#dateRange').data('daterangepicker').setEndDate(endDate.add(duration.asDays() - 1, 'days'));
+
+    $('#dateRangeSpan').html($('#dateRange').data('daterangepicker').startDate.format('MM/DD/YYYY') + ' - ' + $('#dateRange').data('daterangepicker').endDate.format('MM/DD/YYYY'));
+    loadDataForDate();
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////
@@ -3485,372 +3304,6 @@ function isRightClick(event) {
 
 //////////////////////////////////////////////////////////////////////////////////////////////
 
-function loadconfigdropdown(currentselected) {
-    $('#Configurations')[0].options.length = 0;
-    $.each(usersettings.uisettings, function (key, value) {
-        SelectAdd("Configurations", key, value.Name, (currentselected == value.Name) ? "selected" : "");
-    });
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////////
-
-function validatesettings(usersettings) {
-
-    if (typeof (usersettings["lastSetting"]) == 'undefined') {
-        initializesettings();
-        return (false);
-    };
-
-    if (typeof (usersettings["javascriptversion"]) == 'undefined') {
-        initializesettings();
-        return (false);
-    } else if (usersettings["javascriptversion"] != javascriptversion) {
-        initializesettings();
-        return (false);
-    }
-
-    $.each(usersettings.uisettings, function(key, value) {
-
-        if (typeof (value["Name"]) == 'undefined') {
-            initializesettings();
-            return (false);
-        };
-        if (typeof (value["CurrentTab"]) == 'undefined') {
-            initializesettings();
-            return (false);
-        };
-        if (($('#application-tabs li :visible').map(function (i, a) { return $(a).text(); }).get()).indexOf(value["CurrentTab"]) < 0) {
-            initializesettings();
-            return (false);
-        }
-        if (typeof (value["DataFromDate"]) == 'undefined') {
-            initializesettings();
-            return (false);
-        };
-        if (typeof (value["DataToDate"]) == 'undefined') {
-            initializesettings();
-            return (false);
-        };
-
-        if (typeof (value["ContextFromDate"]) == 'undefined') {
-            initializesettings();
-            return (false);
-        };
-        if (typeof (value["ContextToDate"]) == 'undefined') {
-            initializesettings();
-            return (false);
-        };
-        if (typeof (value["MapGrid"]) == 'undefined') {
-            initializesettings();
-            return (false);
-        };
-        if (typeof (value["EventSiteDropdownSelected"]) == 'undefined') {
-            initializesettings();
-            return (false);
-        };
-        if (typeof (value["staticPeriod"]) == 'undefined') {
-            initializesettings();
-            return (false);
-        };
-    });
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////////
-
-function configurationapply(item) {
-        
-    var currentconfigname = $("#Configurations :selected").text();
-
-    usersettings["lastSetting"] = currentconfigname;
-
-    $.jStorage.set("usersettings", usersettings);
-
-    $("#datePickerFrom").datepicker("setDate", new Date(getcurrentconfigsetting("DataFromDate")));
-
-    $("#datePickerTo").datepicker("setDate", new Date(getcurrentconfigsetting("DataToDate")));
-
-    contextfromdate = getcurrentconfigsetting("ContextFromDate");
-    contexttodate = getcurrentconfigsetting("ContextToDate");
-
-    if (contextfromdate === contexttodate) {
-        cache_Last_Date = contexttodate;
-    }
-    else {
-        cache_Last_Date = null;
-        cache_Table_Data = null;
-    }
-
-    var selectedsites = getcurrentconfigsetting("EventSiteDropdownSelected");
-    if (selectedsites != null) {
-        $('#siteList').multiselect("uncheckAll");
-        $('#siteList').val(selectedsites);
-    }
-    else {
-        $('#siteList').multiselect("checkAll");
-    }
-
-    $('#siteList').multiselect('refresh');
-    
-    if ($("#application-tabs").tabs("option", "active") !== ($('#application-tabs li a').map(function (i, a) { return $(a).text(); }).get()).indexOf(getcurrentconfigsetting("CurrentTab")))
-        $("#application-tabs").tabs("option", "active", ($('#application-tabs li a').map(function (i, a) { return $(a).text(); }).get()).indexOf(getcurrentconfigsetting("CurrentTab")));
-    else 
-        manageTabsByDate(currentTab, contextfromdate, contexttodate);
-
-    $("#mapGrid")[0].value = getcurrentconfigsetting("MapGrid");
-    $("#staticPeriod")[0].value = getcurrentconfigsetting("staticPeriod");
-
-    selectmapgrid($("#mapGrid")[0]);
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////////
-
-function deleteconfirmation(item) {
-
-    var currentconfigname = $("#Configurations :selected").text();
-
-    if (currentconfigname == "Last Session") return;
-    if (currentconfigname == "Default") return;
-
-    $('#deleteconfigname')[0].innerText = currentconfigname;
-
-    var dialog = $('#delete-dialog').dialog({
-        modal: true,
-        stack: true,
-        width: 300,
-        buttons: {
-
-            "Delete": function () {
-
-                var loc = -1;
-
-                $.each(usersettings.uisettings, function (key, value) {
-                    if (currentconfigname == value.Name) {
-
-
-                            usersettings.uisettings.remove(key, key);
-                            usersettings["lastSetting"] = "Default";
-                            $.jStorage.set("usersettings", usersettings);
-                            loadconfigdropdown("Default");
-                            configurationapply(item);
-                            return (false);
-                            
-                    }
-                });
-
-                $(this).dialog("close");
-            },
-
-            Cancel: function () {
-
-                $(this).dialog("close");
-
-            }
-
-        }
-    }).parent('.ui-dialog').css('zIndex', 1000000);
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////////
-
-function configurationscopy(item) {
-    var dialog = $('#modal-dialog').dialog({
-        modal: true,
-        stack: true,
-        width: 300,
-        buttons: {
-
-            "Create": function () {
-                var theconfigname = $("#newconfigname").val();
-                $("#newconfigname")[0].value = "";
-
-                if (theconfigname.length > 0) {
-                    createupdateconfig(theconfigname);
-                    loadconfigdropdown(theconfigname);
-                }
-
-                $(this).dialog("close");
-            },
-
-            Cancel: function () {
-
-                $(this).dialog("close");
-
-            }
-
-        }
-    }).parent('.ui-dialog').css('zIndex', 1000000);
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////////
-
-function substituteToken(thetoken) {
-
-var returnvalue = "";
-
-switch (thetoken) {
-
-    case "Today":
-        returnvalue = $.datepicker.formatDate("mm/dd/yy", new Date());
-        break;
-
-    case "PastWeek":
-        var d = new Date();
-        d.setDate(d.getDate() - 7);
-
-        returnvalue = $.datepicker.formatDate("mm/dd/yy", d);
-        break;
-
-    case "PastMonth":
-
-        var d = new Date();
-        d.setDate(d.getDate() - 30);
-
-        returnvalue = $.datepicker.formatDate("mm/dd/yy", d);
-        break;
-
-    case "PastYear":
-        var d = new Date();
-        d.setDate(d.getDate() - 365);
-
-        returnvalue = $.datepicker.formatDate("mm/dd/yy", d);
-        break;
-            
-    default:
-        returnvalue = thetoken;
-        /// Today
-        break;
-}
-
-return (returnvalue);
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////////
-
-function getcurrentconfigsetting(configatom) {
-    var returnvalue = null;
-    var currentconfigname = $("#Configurations :selected").text();
-
-    $.each(usersettings.uisettings, function (key, value) {
-        if (currentconfigname == value.Name) {
-
-            switch (configatom) {
-                
-                case "DataToDate":
-                case "DataFromDate":
-                case "ContextToDate":
-                case "ContextFromDate":
-                    returnvalue = substituteToken(value[configatom]);
-                    break;
-
-                default:
-                    returnvalue = value[configatom];
-                    break;
-            }
-
-            return (false);
-        }
-    });
-    return (returnvalue);
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////////
-
-function configurationsupdate(item) {
-    var currentconfigname = $("#Configurations :selected").text();
-    createupdateconfig(currentconfigname);
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////////
-
-function configurationsdelete(item) {
-    deleteconfirmation(item);
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////////
-
-function initializesettings() {
-    var thesetting = {};
-    usersettings.uisettings.length = 0;
-
-    usersettings["javascriptversion"] = javascriptversion;
-
-    thesetting["Name"] = "Default";
-    thesetting["DataToDate"] = "Today";
-    thesetting["DataFromDate"] = "PastMonth";
-    thesetting["ContextToDate"] = "Today";
-    thesetting["ContextFromDate"] = "PastMonth";
-    thesetting["CurrentTab"] = $('#application-tabs li :visible').first().text();
-    thesetting["MapGrid"] = "Grid";
-    thesetting["EventSiteDropdownSelected"] = null;
-    thesetting["staticPeriod"] = "PastMonth";
-
-    usersettings["uisettings"].push(thesetting);
-
-    var thesetting = {};
-    thesetting["Name"] = "Last Session";
-    thesetting["CurrentTab"] = $('#application-tabs li :visible').first().text();
-    thesetting["DataFromDate"] = $.datepicker.formatDate("mm/dd/yy", new Date(datafromdate));
-    thesetting["DataToDate"] = $.datepicker.formatDate("mm/dd/yy", new Date(datatodate));
-    thesetting["ContextFromDate"] = $.datepicker.formatDate("mm/dd/yy", new Date(datafromdate));
-    thesetting["ContextToDate"] = $.datepicker.formatDate("mm/dd/yy", new Date(datatodate));
-    thesetting["MapGrid"] = "Map";
-    thesetting["EventSiteDropdownSelected"] = null;
-    thesetting["staticPeriod"] = "Custom";
-
-    usersettings["lastSetting"] = "Default";
-    usersettings["uisettings"].push(thesetting);
-
-    $.jStorage.set("usersettings", null);
-    $.jStorage.set("usersettings", usersettings);
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////////
-
-function createupdateconfig(configname) {
-
-    if (configname == "Default") return;
-
-    if (configname == null) {
-        configname = "Last Session";
-    }
-
-    if (usersettings == null) {
-        usersettings = {
-            lastSetting: {},
-            uisettings: []
-        };
-    }
-
-    var thesetting = {};
-
-    thesetting["Name"] = configname;
-    thesetting["CurrentTab"] = currentTab;
-    thesetting["DataFromDate"] = $("#datePickerFrom")[0].value;
-    thesetting["DataToDate"] = $("#datePickerTo")[0].value;
-    thesetting["ContextFromDate"] = $.datepicker.formatDate("mm/dd/yy", new Date(contextfromdate));
-    thesetting["ContextToDate"] = $.datepicker.formatDate("mm/dd/yy", new Date (contexttodate));
-    thesetting["MapGrid"] = $("#mapGrid")[0].value;
-    thesetting["EventSiteDropdownSelected"] = $("#siteList").val();
-    thesetting["staticPeriod"] = $("#staticPeriod").val();
-
-    var loc = -1;
-
-    $.each(usersettings.uisettings, function (key, value) {
-        if (configname == value.Name) loc = key;
-    });
-
-    if (loc == -1) {
-        usersettings["uisettings"].push(thesetting);
-    } else {
-        usersettings.uisettings[loc] = thesetting;
-    }
-
-    usersettings["lastSetting"] = "Default";
-    $.jStorage.set("usersettings", usersettings);
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////////
-
 function showContent() {
 
     $("#loginContent").css("visibility", "hidden");
@@ -3861,38 +3314,91 @@ function showContent() {
 
 //////////////////////////////////////////////////////////////////////////////////////////////
 
-function getMeters() {
+function getMeters(meterGroup) {
+    if (meterGroup == "ClickEvent") {
+        $(window).trigger("meterSelectUpdated");
+        return;
+    }
 
-    var thedatasent = "{'userName':'" + postedUserName + "'}";
+    dataHub.getMeters(meterGroup, postedUserName).done(function (data) {
 
-    $.ajax({
-        type: "POST",
-        url: homePath + '/mapService.asmx/getMeters',
-        data: thedatasent,
-        contentType: "application/json; charset=utf-8",
-        dataType: 'json',
-        cache: true,
-        success: function (data) {
-            cache_Meters = data.d;
-        },
-        failure: function (msg) {
-            alert(msg);
-        },
-        async: false
-    });
+        data.sort(function (a, b) {
+            if (a.Name.toLowerCase() < b.Name.toLowerCase()) return -1;
+            if (a.Name.toLowerCase() > b.Name.toLowerCase()) return 1;
+            return 0;
+        });
+
+        cache_Meters = data;
+
+        if(meterList == null)
+            meterList = new MeterListClass(data);
+        else {
+            meterList.resetDisplayAll();
+
+            $.each(data, function (_, d) {
+                if(meterList.indexOf(d.ID) >= 0)
+                {
+                    meterList.setSelected(d.ID, true);
+                    meterList.setDisplayed(d.ID, true);
+                    meterList.addMeterGroup(d.ID, meterGroup);
+                }
+                else
+                {
+                    meterList.addMeter(d);
+                    meterList.addMeterGroup(d.ID, meterGroup);
+                }
+
+            });
+        }
+
+        $('#meterSelected').text(meterList.selectedCount());
+        $(window).trigger("meterSelectUpdated");
+    }).fail(function (msg) {
+        alert(msg);
+    })
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////
 
-function selectStaticPeriod(thecontrol) {
-    var theCalculatedDate = new Date();
+function selectMeterGroup(thecontrol) {
+    mg = $('#deviceFilterList').val();
 
-    if (thecontrol.value != "Custom") {
-        $("#datePickerTo").datepicker("setDate", new Date(theCalculatedDate));
-        $("#datePickerFrom").datepicker("setDate", new Date(substituteToken(thecontrol.value)));
-        loadDataForDate();
+    getMeters(mg);
+
+    $.each(Object.keys(leafletMap), function (i, key) {
+        if (leafletMap[key]) {
+            mapMarkers[key].forEach(function (d) { leafletMap[key].removeLayer(d.marker) });
+            mapMarkers[key] = [];
+            leafletMap[key] = null;
+            var parent = $('#theMap' + key).parent();
+            $('#theMap' + key).remove();
+            $(parent).append('<div id="theMap' + key + '"></div>');
+        }
+    });
+
+    var newTab = currentTab;
+    if (newTab.indexOf("Overview") > -1) {
     }
+    else if (newTab === "MeterActivity") {
+    }
+    else if (newTab === "ModbusData") {
+    }
+    else if (newTab === "HistorianData") {
+    }
+    else {
+        cache_Graph_Data = null;
+        cache_ErrorBar_Data = null;
+        cache_Sparkline_Data = null;
+        var mapormatrix = $("#map" + currentTab + "Grid")[0].value;
+        $(window).one("meterSelectUpdated", function () {
+            manageTabsByDate(newTab, contextfromdate, contexttodate);
+        });
+
+    }
+
+
 }
+
 
 //////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -3914,90 +3420,47 @@ $(document).ready(function () {
         }
     });
 
-
-    showContent();
+    $(window).on('hubConnected', function () {
+        showContent();
+    })
 });
 
 //////////////////////////////////////////////////////////////////////////////////////////////
 
 function loadsitedropdown() {
 
-    $("#siteList").multiselect({
-        close: function (event, ui) {
-            showSiteSet($("#selectSiteSet" + currentTab)[0]);
-            updateGridWithSelectedSites();
-            selectsitesonmap();
-            selectsitesincharts();
-        },
-        minWidth: 250, selectedList: 1, noneSelectedText: "Select Site", cssClass: '.multiselectText'
-    }).multiselectfilter();
-
-    $.each(cache_Meters, function (key, value) {
-        SelectAdd("siteList", value.id, value.name, "selected");
-    });
-
-    var selectedsites = getcurrentconfigsetting("EventSiteDropdownSelected");
-    if (selectedsites != null) {
-        $('#siteList').multiselect("uncheckAll");
-        $('#siteList').val(selectedsites);
-    }
-    else {
-        $('#siteList').multiselect("checkAll");
-    }
-
-    $('#siteList').multiselect('refresh');
-
-    //$('#selectHeatmapDisturbances').multiselect();
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////
 function loadSettingsAndApply() {
+        // Turn Off Features
 
-    var thedatasent = "{'userName':'" + postedUserName + "'}";
-    var url = homePath + "/eventService.asmx/getDashSettings";
+        applicationsettings = dashSettings;
 
-    $.ajax({
-        type: "POST",
-        url: url,
-        data: thedatasent,
-        contentType: "application/json; charset=utf-8",
-        dataType: 'json',
-        cache: true,
-        success: function (data) {
-
-            var settings = eval(data.d);
-            // Turn Off Features
-
-            applicationsettings = settings;
-
-            $.each(settings, (function (key, value) {
-                if (value.Name == "DashTab") {
-                    if (value.Enabled == 'True') {
-                        $(value.Value).show();
-                    } else {
-                        $(value.Value).hide();
-                    }
+        $.each(dashSettings, (function (key, value) {
+            if (value.Name == "DashTab") {
+                if (value.Enabled == true) {
+                    $(value.Value).show();
+                } else {
+                    $(value.Value).hide();
                 }
+            }
 
 
-                if (value.Name == "DashImage") {
+            if (value.Name == "DashImage") {
 
-                }
+            }
 
-            }));
+        }));
 
-        },
-        failure: function (msg) {
-            alert(msg);
-        },
-        async: false
-    });
+        //$(window).trigger("settingsLoaded");
 }
   
 //////////////////////////////////////////////////////////////////////////////////////////////
 
 function buildPage() {
 
+    loadSettingsAndApply();
 
     $(document).bind('contextmenu', function (e) { return false; });
 
@@ -4005,7 +3468,7 @@ function buildPage() {
 
     $(document).ajaxStart(function () {
         timeout = setTimeout(function () {
-            $.blockUI({ message: '<div unselectable="on" class="wait_container"><img alt="" src="./images/ajax-loader.gif" /><br><div unselectable="on" class="wait">Please Wait. Loading...</div></div>' });
+            $.blockUI({ message: '<div unselectable="on" class="wait_container"><img alt="" src="' + homePath + '/Images/ajax-loader.gif" /><br><div unselectable="on" class="wait">Please Wait. Loading...</div></div>' });
         }, 1000);
     });
 
@@ -4027,6 +3490,7 @@ function buildPage() {
     $('#modal-dialog').hide();
 
     var mousemove = null;
+
 
     $(".resizeable").resizable(
     {
@@ -4067,23 +3531,90 @@ function buildPage() {
         return (true);
     });
 
-    $.ech.multiselect.prototype.options.selectedText = "# of # selected";
 
-    $(window).on('resize', function () { resizeMapAndMatrix(currentTab); });
-    loadSettingsAndApply();
-    if ($.jStorage.get("usersettings") != null) {
-        usersettings = $.jStorage.get("usersettings");
-        validatesettings(usersettings);
-    } else {
-        initializesettings();
+    $(window).on('resize', function () { if (currentTab != 'MeterActivity') resizeMapAndMatrix(currentTab); });
+
+    var savedDisabledList = $.jStorage.get("disabledList");
+    if (savedDisabledList != null) {
+        $.each(Object.keys(savedDisabledList), function (_, key) {
+            $.each(Object.keys(savedDisabledList[key]), function (_, key2) {
+                if (!disabledList.hasOwnProperty(key))
+                    disabledList[key] = {}
+
+                disabledList[key][key2] = savedDisabledList[key][key2]
+            });
+        });
     }
+    else
+        $.jStorage.set("disabledList", disabledList)
 
-    loadconfigdropdown(usersettings.lastSetting);
+    $('.grid').masonry({
+        itemSelector: '.grid-item',
+        columnWidth: 400
+    });
 
-    currentTab = $('#application-tabs li :visible').first().text();
+    $('#settingsModal').on('shown.bs.modal', function () {
+        $('.grid').masonry('layout');
+    });
+
+    $('#filterExpressionHelp').mouseenter(function(e){
+        $.jsPanel({
+            paneltype: {
+                tooltip: true,
+                mode: 'semisticky',
+                connector: true
+            },
+            position: {
+                my: 'center-bottom',
+                at: 'center-top',
+                of: e.target
+            },
+            contentSize: { width: 400, height: 400 },
+            theme: 'blue',
+            headerTitle: 'Filter Expression Help',
+            callback: function (panel) {
+                panel.content.css('padding', '10px');
+                panel.css('z-index','2000')
+                if ($(window).scrollTop() > parseInt(panel.css('top'))) {
+                    panel.reposition({ my: 'center-top', at: 'center-bottom', of: e.target });
+                }
+
+                var content = "<p>Filter expressions can be used to limit the number of monitors for a monitor (meter) group.  The syntax is like a SQL WHERE expression.  The operators are:</p><ul><li><code>=</code> operator to equate an attribute</li><li> the <code>LIKE</code> operator to do a compare</li><li> the <code>%</code> or <code>*</code> operator are used as a wild card</li></ul> " +
+                              "<p>The available fields for filtering are associted with a monitor (meter) are: </p><ul><li>Name</li><li>Alias</li><li>ShortName</li><li>AssetKey</li><li>MeterLocationID</li></ul>" +
+                              "<p>Examples:</p> <ul><li><code>Alias = 'Greenville'</code></li><li><code>Name LIKE 'DFR%'</code></li><li><code>ShortName LIKE '%ville'</code></li></ul>"
+
+                panel.content.append(content)
+
+            }
+        });
+    });
+
+    // Settings modal jscolor and enable change events
+    $('.modal-body input').change(function (event) {
+        var tab = $(event.currentTarget).parent().parent().parent().parent().parent().parent().find('h4').text();
+        var value = $(event.currentTarget).parent().parent().text().trim();
+        var boolean = $(event.currentTarget).parent().parent().find('[type=checkbox]').prop('checked');
+        var field;
+        if ($(event.currentTarget).attr('id').indexOf('enable') > -1){
+            tab += "Chart";
+            field = "enable";
+        }
+        else if ($(event.currentTarget).attr('id').indexOf('tab') > -1){
+            tab = "DashTab";
+            field = "tab";
+        }
+        else if ($(event.currentTarget).attr('id').indexOf('color') > -1) {
+            tab += "ChartColors";
+            value += ',#' + $(event.currentTarget).val();
+            field = "color";
+        }
+
+        var id = parseInt($(event.currentTarget).attr('id').split(field)[1]);
+
+        dataHub.updateDashSettings(id, tab, value, boolean, userId);
+    });
 
     $("#application-tabs").tabs({
-        active: getcurrentconfigsetting("CurrentTab"),
         heightStyle: "100%",
         widthStyle: "99%",
 
@@ -4093,64 +3624,84 @@ function buildPage() {
                 $('#headerStrip').hide();
                 showOverviewPage(currentTab);
             }
-            else if(newTab === "ModbusData"){
+            else if (newTab === "MeterActivity") {
+                $('#headerStrip').hide();
+                showMeterActivity();
+            }
+            else if (newTab === "ModbusData") {
+                $('#headerStrip').hide();
                 showModbusData();
             }
             else if (newTab === "HistorianData") {
                 showHistorianData();
             }
-            else {
+            else {             
                 cache_Graph_Data = null;
-                cache_Errorbar_Data = null;
-                var mapormatrix = $("#mapGrid")[0].value;
+                cache_ErrorBar_Data = null;
+                cache_Sparkline_Data = null;
+                var mapormatrix = $("#map" + currentTab + "Grid")[0].value;
                 $('#headerStrip').show();
-                manageTabsByDate(newTab, contextfromdate, contexttodate);
-                $("#mapGrid")[0].value = mapormatrix;
-                selectmapgrid($("#mapGrid")[0]);
-
+                $(".mapGrid").val(mapormatrix);
+                selectmapgrid($("#map" + currentTab + "Grid")[0]);
+                loadDataForDate();
             }
 
-            
+
         }
     });
 
-    datafromdate = getcurrentconfigsetting("DataFromDate");
-    datatodate = getcurrentconfigsetting("DataToDate");
+    loadsitedropdown();
 
-    contextfromdate = getcurrentconfigsetting("ContextFromDate");
-    contexttodate = getcurrentconfigsetting("ContextToDate");
+    currentTab = defaultView.Tab;
+
+
+    if (defaultView.DateRange < 0) {
+        datafromdate = moment(defaultView.FromDate).utc().format('MM/DD/YYYY');
+        datatodate = moment(defaultView.ToDate).utc().format('MM/DD/YYYY');
+        contextfromdate = moment(defaultView.FromDate).utc().format('MM/DD/YYYY');
+        contexttodate = moment(defaultView.ToDate).utc().format('MM/DD/YYYY');
+
+    }
+    else {
+        datafromdate = moment(dateRangeOptions.ranges[Object.keys(dateRangeOptions.ranges)[defaultView.DateRange]][0]).utc().format('MM/DD/YYYY');
+        datatodate = moment(dateRangeOptions.ranges[Object.keys(dateRangeOptions.ranges)[defaultView.DateRange]][1]).utc().format('MM/DD/YYYY');
+        contextfromdate = datafromdate;
+        contexttodate = datatodate;
+
+    }
+
 
     initializeDatePickers(datafromdate, datatodate);
-    getMeters();
-    loadsitedropdown();
     initiateTimeRangeSlider();
     initiateColorScale();
+    getMeters(defaultView.DeviceFilterID);
 
-
-    resizeMapAndMatrix(currentTab);
     if (currentTab.indexOf("Overview") > -1) {
         $('#headerStrip').hide();
         showOverviewPage(currentTab);
 
-    } else if (currentTab === "ModbusData") {
+    }
+    else if (currentTab === "MeterActivity") {
+        $('#headerStrip').hide();
+        showMeterActivity();
+    }
+    else if (currentTab === "ModbusData") {
+        $('#headerStrip').hide();
         showModbusData();
     }
     else if (currentTab === "HistorianData") {
+        $('#headerStrip').hide();
         showHistorianData();
     }
     else {
-        cache_Graph_Data = null;
-        cache_Errorbar_Data = null;
-
+        $(".mapGrid").val(defaultView.MapGrid);
         $('#headerStrip').show();
-        manageTabsByDate(currentTab, contextfromdate, contexttodate);
 
-
-        $("#application-tabs").tabs("option", "active", ($('#application-tabs li a').map(function (i, a) { return $(a).text(); }).get()).indexOf(currentTab));
-        $("#mapGrid")[0].value = getcurrentconfigsetting("MapGrid");
-        $("#staticPeriod")[0].value = getcurrentconfigsetting("staticPeriod");
-
-        selectmapgrid($("#mapGrid")[0]);
+        $(window).one("meterSelectUpdated", function () {
+            $("#application-tabs").tabs("option", "active", ($('#application-tabs li a').map(function (i, a) { return $(a).text(); }).get()).indexOf(currentTab));
+            selectmapgrid($("#map" + currentTab + "Grid")[0]);
+            resizeMapAndMatrix(currentTab);
+        });
     }
 
 }
@@ -4169,12 +3720,13 @@ function loadLeafletMap(theDiv) {
             attributionControl: false
         });
 
-        mapLink =
-            '<a href="http://openstreetmap.org">OpenStreetMap</a>';
+        var mapLink =
+            '<a href="https://openstreetmap.org">OpenStreetMap</a>';
 
         L.tileLayer(
-            'http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             }).addTo(leafletMap[currentTab]);
+
 
         var contourControl = L.control({ position: 'bottomleft' });
 
@@ -4193,7 +3745,7 @@ function loadLeafletMap(theDiv) {
                                     '</td>' +
                                     '<td colspan="1">' +
                                         '<select class="form-control" id="contourAnimationResolutionSelect">' +
-                                            '<option value="15">15</option>' +
+                                            '<option value="15">(High Res)15</option>' +
                                             '<option value="14">14</option>' +
                                             '<option value="13">13</option>' +
                                             '<option value="12">12</option>' +
@@ -4206,7 +3758,7 @@ function loadLeafletMap(theDiv) {
                                             '<option value="5">5</option>' +
                                             '<option value="4">4</option>' +
                                             '<option value="3">3</option>' +
-                                            '<option value="2">2</option>' +
+                                            '<option value="2">(Low Res)2</option>' +
                                         '</select>' +
                                     '</td>' +
                                 '</tr>' +
@@ -4294,7 +3846,7 @@ function loadLeafletMap(theDiv) {
 }
 
 function loadContourLayer(contourQuery) {
-    var tileURL = homePath + '/mapService.asmx/getContourTile?x={x}&y={y}&zoom={z}';
+    var tileURL = homePath + 'mapService.asmx/getContourTile?x={x}&y={y}&zoom={z}';
 
     $.each(contourQuery, function (key, value) {
         tileURL += '&' + key + '=' + encodeURIComponent(value);
@@ -4320,13 +3872,13 @@ function loadContourOverlay(contourInfo) {
     }
 
     if (contourOverlay)
-        contourOverlay.setUrl(contourInfo.URL);
+        contourOverlay.setUrl(homePath + contourInfo.URL);
     else
-        contourOverlay = L.imageOverlay(contourInfo.URL, bounds).addTo(leafletMap[currentTab]);
+        contourOverlay = L.imageOverlay(homePath + contourInfo.URL, bounds).addTo(leafletMap[currentTab]);
 }
 
 function showType(thecontrol) {
-    plotContourMapLocations(cache_Map_Matrix_Data.d, currentTab, cache_Map_Matrix_Data_Date_From, cache_Map_Matrix_Data_Date_To, null);
+    plotMapLocations(cache_Map_Matrix_Data, currentTab, cache_Map_Matrix_Data_Date_From, cache_Map_Matrix_Data_Date_To, null);
 }
 
 function initiateTimeRangeSlider() {
@@ -4395,12 +3947,25 @@ function loadContourAnimationData() {
     var dateFrom = new Date($('#mapHeaderTrendingDataTo').text() + ' ' + $('#tabs-' + currentTab + ' .slider-time').text() + ' UTC').toISOString();
     var dateTo = new Date($('#mapHeaderTrendingDataTo').text() + ' ' + $('#tabs-' + currentTab + ' .slider-time2').text() + ' UTC').toISOString();
     var meters = "";
-    $.each($('#siteList').multiselect("getChecked").map(function () { return this.value; }), function (index, data) {
+    $.each(meterList.selectedIds(), function (index, data) {
         if (index === 0)
             meters = data;
         else
             meters += ',' + data;
     });
+
+    var xMax = leafletMap[currentTab].latLngToContainerPoint(markerGroup.getBounds()._northEast).x;
+    var xMin = leafletMap[currentTab].latLngToContainerPoint(markerGroup.getBounds()._southWest).x;
+    var yMax = leafletMap[currentTab].latLngToContainerPoint(markerGroup.getBounds()._southWest).y;
+    var yMin = leafletMap[currentTab].latLngToContainerPoint(markerGroup.getBounds()._northEast).y;
+
+    var pixels = (xMax - xMin) * (yMax - yMin);
+    var oneGigInPixels = 1024 * 1024 * 1024 * 4;
+
+    if (pixels > oneGigInPixels) {
+        if(!confirm("Your image will exceed 1 GB and could fail. Would you like to continue?"))
+            return;
+    }
 
     var thedatasent = {
         contourQuery: {
@@ -4412,7 +3977,8 @@ function loadContourAnimationData() {
             UserName: postedUserName,
             StepSize: $('#contourAnimationStepSelect').val(),
             Resolution: $('#contourAnimationResolutionSelect').val(),
-            IncludeWeather: $('#weatherCheckbox:checked').length > 0
+            IncludeWeather: $('#weatherCheckbox:checked').length > 0,
+            MeterIds: 0
         }
     };
 
@@ -4420,7 +3986,7 @@ function loadContourAnimationData() {
 
     $.ajax({
         type: "POST",
-        url: homePath + '/mapService.asmx/getContourAnimations',
+        url: homePath + 'mapService.asmx/getContourAnimations',
         data: JSON.stringify(thedatasent),
         contentType: "application/json; charset=utf-8",
         dataType: 'json',
@@ -4448,7 +4014,7 @@ function loopForAnimation(animationData) {
 
     $.ajax({
         type: "POST",
-        url: homePath + '/mapService.asmx/GetProgress',
+        url: homePath + 'mapService.asmx/GetProgress',
         data: JSON.stringify(message),
         contentType: "application/json; charset=utf-8",
         dataType: 'json',
@@ -4485,6 +4051,7 @@ function runContourAnimation(contourData) {
         info.MaxLatitude = contourData.MaxLatitude;
         info.MinLongitude = contourData.MinLongitude;
         info.MaxLongitude = contourData.MaxLongitude;
+        info.JSON = info.Locations;
     });
 
     var index = 0
@@ -4495,7 +4062,7 @@ function runContourAnimation(contourData) {
         var progressBarIndex = Math.round(index / (contourData.Infos.length - 1) * 100);
         $('#tabs-' + currentTab + ' #contourProgressBar').attr('value', progressBarIndex);
         $('#tabs-' + currentTab + ' #progressDate').text(contourData.Infos[index].Date);
-        plotContourMapLocations(info, null, null, null, null);
+        plotMapLocations(info, null, null, null, null);
     }
     var interval;
     $('#tabs-' + currentTab + ' #contourProgressBar').off('click');
@@ -4571,17 +4138,10 @@ function stepSelectionChange(thecontrol) {
     $('.slider-range').slider("option", "step", parseInt(thecontrol.value));
 }
 
-function showOverviewPage(tab) {
-    var columnHeight = $(window).height() - $('#tabs-' + currentTab).offset().top;
-    $('#tabs-'+tab).css('height', columnHeight);
-    //$('#overviewDate').text(new Date(new Date().setDate(new Date().getDate() - 1)).toDateString());
-
-}
-
 function initiateColorScale() {
     $.ajax({
         type: "POST",
-        url: homePath + '/mapService.asmx/getColorScales',
+        url: homePath + 'mapService.asmx/getColorScales',
         contentType: "application/json; charset=utf-8",
         cache: true,
         success: function (data) {
@@ -4601,11 +4161,11 @@ function showColorScale(thecontrol) {
     $('#tabs-' + currentTab + ' #progressBar').hide();
     $('#tabs-' + currentTab + ' .contourControl').css('width', '165px');
 
-    var mapormatrix = $("#mapGrid")[0].value;
+    var mapormatrix = $("#map" + currentTab + "Grid")[0].value;
 
     manageTabsByDate(currentTab, cache_Map_Matrix_Data_Date_From, cache_Map_Matrix_Data_Date_To);
-    $("#mapGrid")[0].value = mapormatrix;
-    selectmapgrid($("#mapGrid")[0]);
+    $(".mapGrid").val(mapormatrix);
+    selectmapgrid($("#map" + currentTab + "Grid")[0]);
 }
 
 function cancelCall(animationID) {
@@ -4614,7 +4174,7 @@ function cancelCall(animationID) {
     $.ajax({
         type: "POST",
         data: { 'taskID': animationID },
-        url: homePath + '/mapService.asmx/CancelCall',
+        url: homePath + 'mapService.asmx/CancelCall',
         failure: function (msg) {
             alert(msg);
         },
@@ -4657,11 +4217,11 @@ function showHistorianData() {
 }
 
 function getBase64MeterSelection() {
-    var meterSelections = $('#siteList').multiselect('widget').find('input:checkbox').sort(function (a, b) {
-        return Number(a.value) - Number(b.value);
-    }).map(function () {
-        return $(this).is(':checked');
-    }).get();
+    var meterSelections = deepCopy(meterList.list).sort(function (a, b) {
+        return a.ID - b.ID;
+    }).map(function (a) {
+        return a.Selected;
+    });
 
     var base64Selections = '';
 
@@ -4674,10 +4234,219 @@ function getBase64MeterSelection() {
             (meterSelections[i + 4] ?  2 : 0) +
             (meterSelections[i + 5] ?  1 : 0);
 
-        base64Selections += base64Map[mapIndex];
+        base64Selections += '' + base64Map[mapIndex];
     }
 
     return base64Selections;
+}
+
+function showMagDur(theControl) {
+    if ($(theControl).val() == 0) {
+        $('#OverviewDisturbances').show()
+        $('#OverviewDisturbancesMagDur').hide()
+    }
+    else {
+        $('#OverviewDisturbances').hide()
+        $('#OverviewDisturbancesMagDur').show()
+        $(window).trigger('resize');
+    }
+}
+
+function showDeviceFilter(word) {
+    if (word == 'new') {
+        $('#deviceFilterId').text('');
+        $('#deviceFilterName').val('');
+        $('#filterExpression').val('');
+        $('#deviceFilterMeterGroup').val(0);
+
+        $('#deviceFilterModal').modal().show();
+        $('#showDeviceFilterSaveBtn').show();
+        $('#showDeviceFilterEditBtn').hide();
+        $('#showDeviceFilterDeleteBtn').hide();
+    }
+    else if (word == 'edit' && $('#deviceFilterList').val() != 0) {
+        dataHub.queryDeviceFilterRecord($('#deviceFilterList').val()).done(function (data) {
+            $('#deviceFilterId').text(data.ID);
+            $('#deviceFilterName').val(data.Name);
+            $('#filterExpression').val(data.FilterExpression);
+            $('#deviceFilterMeterGroup').val(data.MeterGroupID);
+
+            $('#deviceFilterModal').modal().show();
+            $('#showDeviceFilterSaveBtn').hide();
+            $('#showDeviceFilterEditBtn').show();
+            $('#showDeviceFilterDeleteBtn').show();
+        });
+    }
+}
+
+function saveDeviceFilter(word) {
+    if (word == 'new') {
+        var record = {
+            Name: $('#deviceFilterName').val(),
+            UserAccount: postedUserName,
+            FilterExpression: $('#filterExpression').val(),
+            MeterGroupID: $('#deviceFilterMeterGroup').val()
+        }
+
+        dataHub.addDeviceFilter(record).done(function (data) {
+            $('#deviceFilterList').append(new Option(record.Name, data));
+        });
+
+    }
+    else if (word == 'edit') {
+        var record = {
+            ID: $('#deviceFilterId').text(),
+            Name: $('#deviceFilterName').val(),
+            UserAccount: postedUserName,
+            FilterExpression: $('#filterExpression').val(),
+            MeterGroupID: $('#deviceFilterMeterGroup').val()
+        }
+
+        dataHub.editDeviceFilter(record).done(function (data) {
+            $('#deviceFilterList').children().filter('option[value=' + record.ID + ']').remove();
+            $('#deviceFilterList').append(new Option(record.Name, record.ID));
+        });
+
+
+    }
+    else if (word == 'delete') {
+        dataHub.deleteDeviceFilter($('#deviceFilterId').text()).done(function () {
+            $('#deviceFilterList').children().filter('option[value=' + $('#deviceFilterId').text() + ']').remove();
+        });
+    }
+}
+
+function previewDeviceFilter() {
+    dataHub.deviceFilterPreview($('#deviceFilterMeterGroup').val(), $('#filterExpression').val(), postedUserName).done(function (data) {
+        var html = "<div>Total: "+ data.length +"<ul style='height: 300px; overflow-y:scroll'>";
+        $.each(data, function (i, d) {
+            html += "<li>"+ d.Name +"</li>";
+        });
+        html += "</ul></div>"
+        var myPanel = $.jsPanel({
+            headerTitle: "Preview Meter List",
+            content: html,
+            contentSize: {
+                width: 300,
+                height: 300
+            },
+            callback: function (panel) {
+                panel.css('z-index', '2000')
+            }
+        });
+    });
+}
+
+function useSelectedMeters() {
+    $('#deviceFilterMeterGroup').val(0)
+    $('#filterExpression').val('ID IN (' + meterList.selectedIdsString() + ')');
+}
+
+function saveView() {
+    $.jsPanel({
+        paneltype: 'modal',
+        headerTitle: 'Save View',
+        theme: 'success',
+        show: 'animated fadeInDownBig',
+        content: '<label>View Name:</label><input type="text" id="viewName" class="form-control" maxlength="10" /><input id="isDefault" type="checkbox"/>Default<button class="btn btn-primary pull-right">Submit</button>',
+        callback: function (panel) {
+            $("input:first", this).focus();
+            $("button", this.content).click(function () {
+                if ($('#deviceFilterList').val() == 'ClickEvent') {
+                    var record = {
+                        Name: $('#viewName').val(),
+                        UserAccount: postedUserName,
+                        FilterExpression: 'ID IN (' + meterList.selectedIdsString() + ')',
+                        MeterGroupID: $('#deviceFilterMeterGroup').val()
+                    }
+
+                    r = {
+                        Name: $('#viewName').val(),
+                        UserAccount: postedUserName,
+                        DateRange: Object.keys(dateRangeOptions.ranges).indexOf($('#dateRange').data('daterangepicker').chosenLabel),
+                        FromDate: contextfromdate,
+                        ToDate: contexttodate,
+                        Tab: currentTab,
+                        DeviceFilterID: $('#deviceFilterList').val(),
+                        MapGrid: $('#map' + currentTab + 'Grid').val(),
+                        IsDefault: $('#isDefault').prop('checked')
+                    }
+
+
+                    dataHub.addDeviceFilter(record).done(function (data) {
+                        $('#deviceFilterList').append(new Option(record.Name, data));
+                        r.DeviceFilterID = data;
+                        dataHub.addSavedViews(r).done(function (d) {
+                            $('#viewSelect').append(new Option(r.Name, d));
+                            panel.close()
+                        });
+
+                    });
+
+
+                }
+                else {
+                    record = {
+                        Name: $('#viewName').val(),
+                        UserAccount: postedUserName,
+                        DateRange: Object.keys(dateRangeOptions.ranges).indexOf($('#dateRange').data('daterangepicker').chosenLabel),
+                        FromDate: contextfromdate,
+                        ToDate: contexttodate,
+                        Tab: currentTab,
+                        DeviceFilterID: $('#deviceFilterList').val(),
+                        MapGrid: $('#map' + currentTab + 'Grid').val(),
+                        IsDefault: $('#isDefault').prop('checked')
+                    }
+
+                    dataHub.addSavedViews(record).done(function (data) {
+                        $('#viewSelect').append(new Option(record.Name, data));
+                        panel.close()
+                    });
+                }
+
+            });
+        }
+    });
+}
+
+function deleteView() {
+    if ($('#viewSelect').val() != 0) {
+        dataHub.deleteSavedViews($('#viewSelect').val()).done(function () {
+            $('#viewSelect :selected').remove();
+        });
+    }
+
+}
+
+function selectView(theControl) {
+    if($(theControl).val() != 0){
+        dataHub.querySavedViewsRecord($(theControl).val()).done(function (record) {
+            $('#deviceFilterList').val(record.DeviceFilterID);
+            //selectMeterGroup(null);
+            //$($('a.ui-tabs-anchor:contains("' + record.Tab + '")')).click();
+            $('#map' + record.Tab + 'Grid').val(record.MapGrid);
+            selectmapgrid($('#map' + record.Tab + 'Grid')[0]);
+            contextfromdate = moment(record.FromDate).utc().startOf('day').format('YYYY-MM-DD') + "T00:00:00Z";
+            contexttodate = moment(record.ToDate).utc().startOf('day').format('YYYY-MM-DD') + "T00:00:00Z";
+            if (record.DateRange < 0) {
+                $('#dateRange').data('daterangepicker').setStartDate(moment(record.FromDate).utc().format('MM/DD/YYYY'));
+                $('#dateRange').data('daterangepicker').setEndDate(moment(record.ToDate).utc().format('MM/DD/YYYY'));
+                $('#dateRangeSpan').html($('#dateRange').data('daterangepicker').startDate.format('MM/DD/YYYY') + ' - ' + $('#dateRange').data('daterangepicker').endDate.format('MM/DD/YYYY'));
+            }
+            else {
+                $('#dateRange').data('daterangepicker').setStartDate(dateRangeOptions.ranges[Object.keys(dateRangeOptions.ranges)[record.DateRange]][0]);
+                $('#dateRange').data('daterangepicker').setEndDate(dateRangeOptions.ranges[Object.keys(dateRangeOptions.ranges)[record.DateRange]][1]);
+                $('#dateRangeSpan').html($('#dateRange').data('daterangepicker').startDate.format('MM/DD/YYYY') + ' - ' + $('#dateRange').data('daterangepicker').endDate.format('MM/DD/YYYY'));
+
+            }
+
+
+            if(record.Tab != currentTab)
+                $($('a.ui-tabs-anchor:contains("' + record.Tab + '")')).click();
+            else
+                loadDataForDate();
+        });
+    }
 }
 
 /// EOF

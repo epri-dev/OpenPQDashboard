@@ -23,7 +23,7 @@
 //******************************************************************************************************
 -->
 
-<%@ page language="C#" autoeventwireup="true" inherits="OpenSEE, App_Web_lsnpvlg0" %>
+<%@ Page Language="C#" AutoEventWireup="true" CodeFile="OpenSEE.aspx.cs" Inherits="OpenSEE" %>
 
 <!DOCTYPE html>
 

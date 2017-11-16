@@ -20,6 +20,7 @@
 //       Generated original version of source code.
 //
 //******************************************************************************************************
+#define DEBUG
 
 
 using System;
@@ -44,6 +45,7 @@ using Microsoft.AspNet.SignalR.Hubs;
 using Microsoft.AspNet.SignalR.Json;
 using Newtonsoft.Json;
 using PQDashboard.Model;
+
 namespace PQDashboard
 {
     public class MvcApplication : System.Web.HttpApplication
@@ -67,6 +69,7 @@ namespace PQDashboard
             AreaRegistration.RegisterAllAreas();
             FilterConfig.RegisterGlobalFilters(GlobalFilters.Filters);
             RouteConfig.RegisterRoutes(RouteTable.Routes);
+            
             BundleConfig.RegisterBundles(BundleTable.Bundles);
 
             // Add additional virtual path provider to allow access to embedded resources
@@ -100,6 +103,9 @@ namespace PQDashboard
             JsonSerializer serializer = JsonSerializer.Create(settings);
             GlobalHost.DependencyResolver.Register(typeof(JsonSerializer), () => serializer);
 
+#if DEBUG
+            GlobalHost.Configuration.DisconnectTimeout = TimeSpan.FromMinutes(30);
+#endif
         }
 
         /// <summary>

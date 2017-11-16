@@ -1,4 +1,4 @@
-<%@ page language="C#" autoeventwireup="true" inherits="ChannelDataCompleteness, App_Web_lsnpvlg0" %>
+<%@ Page Language="C#" AutoEventWireup="true" CodeFile="ChannelDataCompleteness.aspx.cs" Inherits="ChannelDataCompleteness" %>
 <%@ Import Namespace="FaultData.DataAnalysis" %>
 
 <!DOCTYPE html>

@@ -26,6 +26,7 @@ using System;
 using System.Web.Mvc;
 using GSF.Identity;
 using GSF.Web.Model;
+using GSF.Web.Security;
 using PQDashboard.Model;
 
 namespace PQDashboard.Controllers
@@ -137,11 +138,70 @@ namespace PQDashboard.Controllers
             return View();
         }
 
-        public ActionResult PageTemplate1()
+        public ActionResult OpenSEE()
         {
-            m_appModel.ConfigureView(Url.RequestContext, "PageTemplate1", ViewBag);
+            //m_appModel.ConfigureView(Url.RequestContext, "OpenSEE", ViewBag);
             return View();
         }
+
+        public ActionResult OpenSTE()
+        {
+            //m_appModel.ConfigureView(Url.RequestContext, "OpenSEE", ViewBag);
+            return View();
+        }
+
+        public ActionResult MeterEventsByLine()
+        {
+            m_appModel.ConfigureView(Url.RequestContext, "MeterEventsByLine", ViewBag);
+
+            try
+            {
+                ViewBag.username = System.Web.HttpContext.Current.User.Identity.Name;
+                ViewBag.usersid = UserInfo.UserNameToSID(ViewBag.username);
+
+                if (m_dataContext.Connection.ExecuteScalar<int>("SELECT COUNT(*) FROM UserAccount WHERE Name = {0}", ViewBag.usersid) == 0)
+                {
+                    ViewBag.username = "External";
+                    ViewBag.usersid = "External";
+                }
+            }
+            catch (Exception ex)
+            {
+                ViewBag.username = "";
+            }
+
+            return View();
+        }
+
+        public ActionResult MeterExtensionsByLine()
+        {
+            m_appModel.ConfigureView(Url.RequestContext, "MeterEventsByLine", ViewBag);
+
+            try
+            {
+                ViewBag.username = System.Web.HttpContext.Current.User.Identity.Name;
+                ViewBag.usersid = UserInfo.UserNameToSID(ViewBag.username);
+
+                if (m_dataContext.Connection.ExecuteScalar<int>("SELECT COUNT(*) FROM UserAccount WHERE Name = {0}", ViewBag.usersid) == 0)
+                {
+                    ViewBag.username = "External";
+                    ViewBag.usersid = "External";
+                }
+            }
+            catch (Exception ex)
+            {
+                ViewBag.username = "";
+            }
+
+            return View();
+        }
+
+        public ActionResult MeterDisturbancesByLine()
+        {
+            m_appModel.ConfigureView(Url.RequestContext, "MeterDisturbancesByLine", ViewBag);
+            return View();
+        }
+
 
         #endregion
     }
